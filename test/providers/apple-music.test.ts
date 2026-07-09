@@ -64,4 +64,18 @@ describe("appleMusicProvider", () => {
 
     expect(result).toEqual({ platform: "Apple Music", status: "error" });
   });
+
+  it("returns error when the response is not ok", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      })
+    );
+
+    const result = await appleMusicProvider.search("anything");
+
+    expect(result).toEqual({ platform: "Apple Music", status: "error" });
+  });
 });

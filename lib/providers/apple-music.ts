@@ -21,18 +21,17 @@ export const appleMusicProvider: Provider = {
   async search(query: string): Promise<ProviderResult> {
     const url = `${ITUNES_SEARCH_URL}?term=${encodeURIComponent(query)}&entity=song&limit=1`;
 
-    let response: { ok: boolean; json: () => Promise<ITunesSearchResponse> };
+    let data: ITunesSearchResponse;
     try {
-      response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!response.ok) {
+        return { platform: "Apple Music", status: "error" };
+      }
+      data = await response.json();
     } catch {
       return { platform: "Apple Music", status: "error" };
     }
 
-    if (!response.ok) {
-      return { platform: "Apple Music", status: "error" };
-    }
-
-    const data = await response.json();
     if (data.resultCount === 0 || data.results.length === 0) {
       return { platform: "Apple Music", status: "not_found" };
     }
