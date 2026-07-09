@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { allProviders } from "../../../lib/providers";
 import type { Provider, ProviderResult } from "../../../lib/providers/types";
 import { TtlCache } from "../../../lib/cache";
+import { checkRateLimit } from "../../../lib/rate-limit";
 
 type MetadataValue<T> = { value: T; source: string };
 
@@ -56,6 +57,12 @@ export async function aggregateSearch(
 }
 
 export async function GET(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+  const { success } = await checkRateLimit(ip);
+  if (!success) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const query = request.nextUrl.searchParams.get("q");
   if (!query || query.trim().length === 0) {
     return NextResponse.json({ error: "Missing q parameter" }, { status: 400 });
