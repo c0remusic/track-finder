@@ -15,7 +15,8 @@
 - No silent retries against scraped sites — a failure is surfaced as-is for that search, never retried automatically.
 - Every adapter times out independently (~5-8s) and a slow/broken adapter must never block the other four (`Promise.allSettled`).
 - `tsc --noEmit` must pass before every commit.
-- Verified empirically before writing this plan (2026-07-09, real HTTP requests, not assumed): Apple Music's iTunes Search API and Traxsource's search page are both plain server-rendered responses reachable with a normal HTTP fetch (no headless browser needed). Beatport's search page is server-rendered too, but the actual result data lives inside an embedded `__NEXT_DATA__` JSON blob, not in visible HTML — parse that JSON, don't scrape visible markup. Bandcamp's search page returned a JS "Client Challenge" bot-detection page to a plain fetch (title literally `Client Challenge`), and both `music.amazon.com/search` and `www.amazon.com/s?...` returned an empty client-rendered shell / 503 block page respectively — both require a real headless browser (Playwright), and Amazon in particular may still block a headless browser (its anti-bot stack is aggressive); treat Amazon Music as the highest-risk, most-likely-to-need-extra-work adapter.
+- Verified empirically before writing this plan (2026-07-09, real HTTP requests, not assumed): Apple Music's iTunes Search API and Traxsource's search page are both plain server-rendered responses reachable with a normal HTTP fetch (no headless browser needed). Beatport's search page is server-rendered too, but the actual result data lives inside an embedded `__NEXT_DATA__` JSON blob, not in visible HTML — parse that JSON, don't scrape visible markup. Bandcamp's search page (`bandcamp.com/search`) returned a JS "Client Challenge" bot-detection page to a plain fetch (title literally `Client Challenge`), and both `music.amazon.com/search` and `www.amazon.com/s?...` returned an empty client-rendered shell / 503 block page respectively.
+- **Update (2026-07-10, during Task 6 implementation):** a headless-browser attempt against `bandcamp.com/search` confirmed the "Client Challenge" is a genuine interactive Fastly image/audio CAPTCHA, not a transient JS gate — no wait resolves it, and solving it programmatically is out of scope (would require a CAPTCHA-bypass service, a legal/product decision). Bandcamp is instead reached via its internal `bcsearch_public_api/1/autocomplete_elastic` JSON endpoint (verified for real, not behind the CAPTCHA, no browser needed) — see Task 6 for the revised approach. Amazon Music (Task 7) remains unresolved and is still treated as the highest-risk, most-likely-to-need-a-documented-stub adapter.
 
 ---
 
@@ -45,13 +46,12 @@ track-finder/
     rate-limit.ts                # Upstash-backed per-IP limiter
   scripts/
     smoke-test.mjs              # manual, not run in CI
-    capture-fixture.mjs         # Playwright capture helper (Bandcamp/Amazon tasks)
+    capture-fixture.mjs         # Playwright capture helper (Amazon task; Bandcamp no longer needs it)
   test/
     fixtures/
       traxsource-search.html
       beatport-search.html
-      bandcamp-search.html      # captured during Task 6
-      amazon-music-search.html  # captured during Task 7
+      amazon-music-search.html  # captured during Task 7 (Bandcamp needs no fixture — plain JSON API, no HTML to capture)
     providers/
       apple-music.test.ts
       traxsource.test.ts
@@ -881,101 +881,127 @@ git commit -m "feat: Beatport provider via embedded __NEXT_DATA__ JSON"
 
 ---
 
-### Task 6: Bandcamp provider (Playwright — confirmed to require a real browser)
+### Task 6: Bandcamp provider (internal `bcsearch_public_api` JSON endpoint — revised 2026-07-10)
+
+**Revision note:** the original version of this task (Playwright + cheerio
+against `bandcamp.com/search`) was attempted first and hit a real, unsolvable
+blocker: `bandcamp.com/search?q=...` is gated by a genuine interactive
+Fastly image/audio CAPTCHA (`<title>Client Challenge</title>`, a real
+`<form id="capForm">` requiring a solved answer), not a transient JS
+challenge — confirmed across 3 real Playwright capture attempts with waits
+up to 10s, all returning the same CAPTCHA page. No amount of waiting or a
+plain headless browser gets past this; solving it programmatically was
+correctly treated as out of scope (would mean building a CAPTCHA-solving
+bypass, a legal/product decision, not an engineering one).
+
+Before giving up on Bandcamp entirely, a different discovery route was found
+and verified for real (2026-07-10, via curl): Bandcamp's own frontend calls
+an internal JSON search endpoint for its search-as-you-type autocomplete,
+`POST https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic`,
+and this endpoint is **not** behind the CAPTCHA gate — it returns real
+results to a plain POST request, no browser needed at all. This makes the
+task simpler than originally planned: no Playwright, no cheerio, just a
+`fetch` POST and JSON parsing, following the same pattern as Task 3 (Apple
+Music).
+
+Real verified response (`curl -X POST .../autocomplete_elastic -d
+'{"search_text":"Robert Hood Minus","search_filter":"","full_page":false,"fan_id":null}'`),
+one result trimmed to the fields this adapter uses:
+```json
+{
+  "type": "t",
+  "name": "Minus",
+  "band_name": "Robert Hood",
+  "album_name": "Internal Empire",
+  "item_url_path": "https://roberthood.bandcamp.com/track/minus",
+  "img": "https://f4.bcbits.com/img/0696091404_3.jpg"
+}
+```
+`item_url_path` is already an absolute purchase URL (no concatenation
+needed, unlike Traxsource/Beatport). `type: "t"` marks a track result;
+other type codes (album, band) may appear for broader queries — filter to
+`type === "t"` when picking the first match, since a bare artist+title
+query should resolve to a track. No BPM/key/genre/label are exposed by this
+endpoint (consistent with Bandcamp not having standardized DJ metadata
+fields) — `metadata` will be omitted for this provider, which is fine, the
+orchestrator (Task 8) already treats per-field metadata as optional across
+providers.
 
 **Files:**
-- Create: `scripts/capture-fixture.mjs`
 - Create: `lib/providers/bandcamp.ts`
-- Create: `test/fixtures/bandcamp-search.html` (captured in Step 1)
 - Test: `test/providers/bandcamp.test.ts`
 
 **Interfaces:**
 - Consumes: `Provider`, `ProviderResult` (Task 2).
 - Produces: `bandcampProvider: Provider`.
 
-Confirmed 2026-07-09: a plain `curl` against `https://bandcamp.com/search?q=...` returns a page titled `Client Challenge` (JS bot-detection gate), not real results. A headless browser is required. The exact result markup is not yet known — Step 1 below captures it for real before any selector is written.
+- [ ] **Step 1: Write the failing test**
 
-- [ ] **Step 1: Install Playwright and capture a real fixture**
-
-Run:
-```bash
-npm install -D playwright
-npx playwright install chromium
-```
-
-Create `scripts/capture-fixture.mjs`:
-```js
-import { chromium } from "playwright";
-import { writeFileSync } from "node:fs";
-
-const url = process.argv[2];
-const outPath = process.argv[3];
-if (!url || !outPath) {
-  console.error("Usage: node scripts/capture-fixture.mjs <url> <outPath>");
-  process.exit(1);
-}
-
-const browser = await chromium.launch();
-const page = await browser.newPage({
-  userAgent:
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-});
-await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
-const html = await page.content();
-writeFileSync(outPath, html, "utf-8");
-console.log(`Saved ${html.length} bytes to ${outPath}`);
-await browser.close();
-```
-
-Run:
-```bash
-node scripts/capture-fixture.mjs "https://bandcamp.com/search?q=Robert%20Hood%20Minus" test/fixtures/bandcamp-search.html
-```
-
-- [ ] **Step 2: Inspect the captured fixture and identify real selectors**
-
-Open `test/fixtures/bandcamp-search.html` and find the container holding search results (as of past observation, Bandcamp's search results have historically used a `.result-info` block per result with a `.heading a` for the title/link, `.subhead` for artist, and `.art img` for the cover — but this must be confirmed against the fixture just captured, not assumed). Note the actual class names found before writing Step 4. If the captured page still shows a "Client Challenge"/CAPTCHA instead of results, increase the Playwright wait (`page.waitForSelector` on a plausible results container, or `waitForTimeout(3000)` after `goto`) and re-run Step 1 before continuing.
-
-- [ ] **Step 3: Write the failing test**
-
-Create `test/providers/bandcamp.test.ts` following the exact same pattern as `test/providers/traxsource.test.ts` (Task 4, Step 2): read the fixture captured in Step 1, stub `fetch`... **but note Bandcamp requires Playwright, not `fetch`** — stub the Playwright call instead. Structure:
+Create `test/providers/bandcamp.test.ts`:
 ```ts
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { bandcampProvider } from "../../lib/providers/bandcamp";
-import * as playwright from "playwright";
-
-const fixture = readFileSync(join(__dirname, "../fixtures/bandcamp-search.html"), "utf-8");
 
 describe("bandcampProvider", () => {
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it("parses the first result from the captured fixture", async () => {
-    const fakePage = {
-      goto: vi.fn(),
-      content: vi.fn().mockResolvedValue(fixture),
-      close: vi.fn(),
+  it("maps the first track result to ProviderResult", async () => {
+    const fakeResponse = {
+      auto: {
+        results: [
+          {
+            type: "t",
+            name: "Minus",
+            band_name: "Robert Hood",
+            item_url_path: "https://roberthood.bandcamp.com/track/minus",
+            img: "https://f4.bcbits.com/img/0696091404_3.jpg",
+          },
+        ],
+      },
     };
-    const fakeBrowser = {
-      newPage: vi.fn().mockResolvedValue(fakePage),
-      close: vi.fn(),
-    };
-    vi.spyOn(playwright.chromium, "launch").mockResolvedValue(fakeBrowser as any);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => fakeResponse })
+    );
 
     const result = await bandcampProvider.search("Robert Hood Minus");
 
-    // Fill in the exact expected fields once Step 2's real selectors are known —
-    // this assertion must match a genuine result parsed from the real fixture,
-    // not an invented value.
-    expect(result.status).toBe("found");
-    expect(result.platform).toBe("Bandcamp");
+    expect(result).toEqual({
+      platform: "Bandcamp",
+      status: "found",
+      purchaseUrl: "https://roberthood.bandcamp.com/track/minus",
+      coverUrl: "https://f4.bcbits.com/img/0696091404_3.jpg",
+      matchedArtist: "Robert Hood",
+      matchedTitle: "Minus",
+    });
   });
 
-  it("returns error when Playwright throws", async () => {
-    vi.spyOn(playwright.chromium, "launch").mockRejectedValue(new Error("launch failed"));
+  it("returns not_found when there are no track-type results", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ auto: { results: [{ type: "b", name: "Some Band" }] } }),
+      })
+    );
+
+    const result = await bandcampProvider.search("asdkjaskdjaskdj");
+
+    expect(result).toEqual({ platform: "Bandcamp", status: "not_found" });
+  });
+
+  it("returns error when the request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+
+    const result = await bandcampProvider.search("anything");
+
+    expect(result).toEqual({ platform: "Bandcamp", status: "error" });
+  });
+
+  it("returns error when the response is not ok", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
 
     const result = await bandcampProvider.search("anything");
 
@@ -984,84 +1010,83 @@ describe("bandcampProvider", () => {
 });
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/providers/bandcamp.test.ts`
 Expected: FAIL — `Cannot find module '../../lib/providers/bandcamp'`
 
-- [ ] **Step 5: Write the implementation**
+- [ ] **Step 3: Write the implementation**
 
-Create `lib/providers/bandcamp.ts` using the real selectors identified in Step 2 (replace the placeholder selectors below — marked clearly — with what Step 2 actually found):
+Create `lib/providers/bandcamp.ts`:
 ```ts
-import { chromium } from "playwright";
-import * as cheerio from "cheerio";
 import type { Provider, ProviderResult } from "./types";
 
-const BANDCAMP_SEARCH_URL = "https://bandcamp.com/search";
+const BANDCAMP_AUTOCOMPLETE_URL =
+  "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic";
+
+type BandcampResult = {
+  type: string;
+  name: string;
+  band_name?: string;
+  item_url_path?: string;
+  img?: string;
+};
+
+type BandcampAutocompleteResponse = {
+  auto: { results: BandcampResult[] };
+};
 
 export const bandcampProvider: Provider = {
   name: "Bandcamp",
 
   async search(query: string): Promise<ProviderResult> {
-    const url = `${BANDCAMP_SEARCH_URL}?q=${encodeURIComponent(query)}`;
-
-    let html: string;
     try {
-      const browser = await chromium.launch();
-      try {
-        const page = await browser.newPage({
-          userAgent:
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        });
-        await page.goto(url, { waitUntil: "networkidle", timeout: 15000 });
-        html = await page.content();
-      } finally {
-        await browser.close();
+      const response = await fetch(BANDCAMP_AUTOCOMPLETE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          search_text: query,
+          search_filter: "",
+          full_page: false,
+          fan_id: null,
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!response.ok) return { platform: "Bandcamp", status: "error" };
+
+      const data = (await response.json()) as BandcampAutocompleteResponse;
+      const track = data.auto?.results?.find((r) => r.type === "t");
+
+      if (!track || !track.item_url_path) {
+        return { platform: "Bandcamp", status: "not_found" };
       }
+
+      return {
+        platform: "Bandcamp",
+        status: "found",
+        purchaseUrl: track.item_url_path,
+        coverUrl: track.img,
+        matchedArtist: track.band_name,
+        matchedTitle: track.name,
+      };
     } catch {
       return { platform: "Bandcamp", status: "error" };
     }
-
-    const $ = cheerio.load(html);
-    // REPLACE these selectors with what Step 2 found in the real fixture —
-    // do not ship with unverified guesses.
-    const firstResult = $(".result-info").first();
-    if (firstResult.length === 0) {
-      return { platform: "Bandcamp", status: "not_found" };
-    }
-
-    const titleLink = firstResult.find(".heading a").first();
-    const title = titleLink.text().trim();
-    const href = titleLink.attr("href");
-    const artist = firstResult.find(".subhead").first().text().trim();
-    const cover = firstResult.find("img").attr("src");
-
-    if (!href || !title) {
-      return { platform: "Bandcamp", status: "not_found" };
-    }
-
-    return {
-      platform: "Bandcamp",
-      status: "found",
-      purchaseUrl: href,
-      coverUrl: cover,
-      matchedArtist: artist || undefined,
-      matchedTitle: title,
-    };
   },
 };
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/providers/bandcamp.test.ts`
-Expected: PASS — if it fails because the selectors don't match the real fixture, go back to Step 2, re-inspect, correct the selectors in Step 5, and re-run. Do not weaken the test to make it pass; fix the selectors.
+Expected: PASS (4 tests)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add lib/providers/bandcamp.ts test/providers/bandcamp.test.ts test/fixtures/bandcamp-search.html scripts/capture-fixture.mjs package.json
-git commit -m "feat: Bandcamp provider via Playwright (bot-gated site)"
+git add lib/providers/bandcamp.ts test/providers/bandcamp.test.ts
+git commit -m "feat: Bandcamp provider via internal bcsearch_public_api endpoint"
 ```
 
 ---
@@ -1871,5 +1896,5 @@ git commit -m "chore: deployment config" --allow-empty-message -m "deploy to Ver
 ## Self-review notes
 
 - **Spec coverage:** all design.md sections map to tasks — architecture (Tasks 1, 8), 5 providers (Tasks 3-7), two-section UI (Task 10), error handling incl. not_found/error distinction and cache (Task 8), rate limiting (Task 9), disclaimer (Task 10), tests (all tasks), deploy (Task 12).
-- **Verified vs. inferred:** Apple Music, Traxsource, and Beatport adapters are built from real, captured 2026-07-09 data — high confidence. Bandcamp and Amazon Music adapters are deliberately structured as spike-first (capture → inspect → implement) because their real markup is not yet known and Amazon in particular may not be scrapable at all with a headless browser — this is flagged, not hidden.
+- **Verified vs. inferred:** Apple Music, Traxsource, Beatport, and (after the 2026-07-10 revision) Bandcamp adapters are all built from real, captured/curled data — high confidence, no scraping/browser needed for any of the four. Amazon Music (Task 7) remains structured as spike-first (capture → inspect → implement) because its real markup is not yet known and it may not be scrapable at all even with a headless browser — this is flagged, not hidden.
 - **Type consistency:** `ProviderResult`/`Provider` (Task 2) used identically across Tasks 3-10; `AggregatedMetadata` shape (Task 8) matches what `MetadataSection` (Task 10) consumes.

@@ -1,0 +1,31 @@
+{
+  "props": {
+    "pageProps": {
+      "dehydratedState": {
+        "queries": [
+          {
+            "state": {
+              "data": {
+                "tracks": {
+                  "data": [
+                    {
+                      "track_id": 4196748,
+                      "track_name": "Robert Hood",
+                      "mix_name": "Original Mix",
+                      "artists": [{ "artist_name": "Robert Hood" }],
+                      "bpm": 133,
+                      "key_name": "B Minor",
+                      "genre": [{ "genre_name": "Minimal / Deep Tech" }],
+                      "label": { "label_name": "Telegraph" },
+                      "track_image_uri": "https://geo-media.beatport.com/image_size/1500x250/73e8eb9b-43e3-4810-9a55-47c20f0d2f54.png"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
