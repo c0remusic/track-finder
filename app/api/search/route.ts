@@ -21,23 +21,54 @@ type AggregatedResult = {
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const searchCache = new TtlCache<AggregatedResult>(ONE_HOUR_MS);
 
-async function runProvider(provider: Provider, query: string): Promise<ProviderResult> {
+// Orchestrator-level hard cap per provider, on top of each provider's own
+// internal timeout (fetch AbortSignal / Playwright goto timeout). Prevents a
+// single slow provider (e.g. Amazon Music's ~25s worst case) from making the
+// whole /api/search request time out on Vercel, even when every other
+// provider already finished. The response returns once this budget elapses
+// regardless of what the slow provider's promise eventually does.
+const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
+
+async function runProvider(
+  provider: Provider,
+  query: string,
+  timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
+): Promise<ProviderResult> {
+  const timeoutResult: ProviderResult = { platform: provider.name, status: "error" };
+
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<ProviderResult>((resolve) => {
+    timer = setTimeout(() => resolve(timeoutResult), timeoutMs);
+  });
+
+  // Keep a direct handle on the search promise and attach a no-op catch so
+  // that if it rejects AFTER the timeout has already won the race, Node
+  // doesn't report an unhandled promise rejection in the background.
+  const searchPromise = provider.search(query);
+  searchPromise.catch(() => {});
+
   try {
-    return await provider.search(query);
+    const result = await Promise.race([searchPromise, timeout]);
+    return result;
   } catch {
     return { platform: provider.name, status: "error" };
+  } finally {
+    clearTimeout(timer!);
   }
 }
 
 export async function aggregateSearch(
   query: string,
-  providers: Provider[] = allProviders
+  providers: Provider[] = allProviders,
+  providerTimeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
 ): Promise<AggregatedResult> {
   const cacheKey = query.trim().toLowerCase();
   const cached = searchCache.get(cacheKey);
   if (cached) return cached;
 
-  const results = await Promise.all(providers.map((p) => runProvider(p, query)));
+  const results = await Promise.all(
+    providers.map((p) => runProvider(p, query, providerTimeoutMs))
+  );
 
   const purchase = results.filter((r) => r.status !== "not_found");
 

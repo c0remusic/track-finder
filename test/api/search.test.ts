@@ -74,4 +74,26 @@ describe("aggregateSearch", () => {
     expect(result.purchase.map((r) => r.platform).sort()).toEqual(["A", "B"]);
     expect(result.purchase.find((r) => r.platform === "A")?.status).toBe("error");
   });
+
+  it("marks a provider that never resolves as error and still returns within the timeout budget", async () => {
+    const providers: Provider[] = [
+      fakeProvider({
+        name: "Hangs Forever",
+        search: () => new Promise(() => {}), // never resolves/rejects
+      }),
+      fakeProvider({
+        name: "B",
+        search: async () => ({ platform: "B", status: "found", purchaseUrl: "https://b.example/y" }),
+      }),
+    ];
+
+    const TEST_TIMEOUT_MS = 50;
+    const start = Date.now();
+    const result = await aggregateSearch("query-hanging-provider", providers, TEST_TIMEOUT_MS);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(TEST_TIMEOUT_MS + 500);
+    expect(result.purchase.map((r) => r.platform).sort()).toEqual(["B", "Hangs Forever"]);
+    expect(result.purchase.find((r) => r.platform === "Hangs Forever")?.status).toBe("error");
+  });
 });
