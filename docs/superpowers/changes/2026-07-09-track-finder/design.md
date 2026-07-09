@@ -34,8 +34,8 @@ outil est différé à une décision ultérieure (demande explicite d'Antoine :
   API sans façade.
 - Stack : Next.js (App Router) + React + Tailwind/shadcn (via MCP `shadcn`
   déjà connecté), déployé sur Vercel.
-- Mode de recherche : recherche unitaire (un champ texte, un artiste/titre à
-  la fois) — pas de recherche par lot en v1.
+- Mode de recherche : recherche unitaire, un champ texte libre (pas de
+  décomposition artiste/titre) — pas de recherche par lot en v1.
 - Stratégie de fetch : en direct à la demande, aucun index/cache de catalogue
   persistant.
 - Deux sections de résultat distinctes : **Où acheter** (liens d'achat) et
@@ -51,6 +51,10 @@ outil est différé à une décision ultérieure (demande explicite d'Antoine :
   distinction volontaire, cohérente avec la règle Sift "jamais de fallback
   silencieux".
 - Nom du projet : placeholder générique pour l'instant, à trancher plus tard.
+- Apple Music : API iTunes Search publique/gratuite (pas MusicKit) — corrigé
+  après revue, voir section Architecture.
+- Cache court (~1h) par requête identique, pour réduire la charge de
+  scraping — ajouté après revue, voir Gestion d'erreurs.
 
 ## Architecture
 
@@ -62,9 +66,20 @@ l'API lance en parallèle 5 "adapters" (un par plateforme), chacun avec son
 propre timeout (~5-8s) via `Promise.allSettled` → agrégation des résultats →
 réponse JSON unique → UI affiche les deux sections.
 
-Apple Music dispose d'une vraie API officielle (MusicKit, compte Apple
-Developer 99$/an) — pas de scraping nécessaire pour cette source, risque
-ToS nul. Les 4 autres (Beatport, Traxsource, Amazon Music, Bandcamp) n'ont
+Apple Music : correction actée après vérification (revient sur la décision
+initiale du brainstorm) — MusicKit (API officielle, compte Developer 99$/an)
+ne gère pas l'achat, seulement le catalogue/streaming. On utilise à la place
+l'**API iTunes Search publique** (`itunes.apple.com/search`), gratuite, sans
+compte ni clé, stable depuis plus de 10 ans, qui renvoie un `trackViewUrl`
+pointant directement vers la page d'achat iTunes Store — mieux adaptée au
+besoin et sans coût. Pas de scraping nécessaire pour cette source, risque
+ToS nul.
+
+Amazon Music : vérifié, le store MP3 à l'unité existe toujours (~1,29$/piste,
+DRM-free, indépendant de l'abonnement streaming) — l'hypothèse "achat
+possible" tient.
+
+Les 4 autres (Beatport, Traxsource, Amazon Music, Bandcamp) n'ont
 pas d'API publique accessible et nécessitent du scraping de leurs pages de
 recherche publiques.
 
@@ -83,7 +98,10 @@ l'implémentation, une fois le besoin réel constaté par adapter.
 ## Composants
 
 - `app/page.tsx` — page de recherche : champ texte + bouton, zone de
-  résultats scindée en `AchatSection` / `MetadataSection`.
+  résultats scindée en `AchatSection` / `MetadataSection`, plus un pied de
+  page avec mention légale visible ("liens fournis à titre indicatif, non
+  affilié aux plateformes listées") — mitigation standard et peu coûteuse
+  vu le risque ToS déjà documenté.
 - `app/api/search/route.ts` — orchestrateur : lance les 5 adapters en
   parallèle, agrège, renvoie un JSON unique.
 - `lib/providers/{beatport,traxsource,amazon-music,bandcamp,apple-music}.ts`
@@ -146,6 +164,11 @@ Aucune persistance serveur au-delà de la durée de la requête.
 - Aucun retry automatique agressif : un échec reste affiché tel quel pour
   cette recherche, pas de re-tentative silencieuse qui multiplierait la
   charge/le risque de ban IP sur les sites scrapés.
+- **Cache court par requête identique** (ex. ~1h, en mémoire ou edge) : deux
+  recherches identiques dans cette fenêtre réutilisent le résultat au lieu
+  de re-scraper — réduit le volume de requêtes sortantes et le risque de ban
+  IP, sans reconstituer un index de catalogue (TTL court, clé = requête
+  exacte, pas un stockage progressif de tout ce qui a été cherché).
 
 ## Tests
 
