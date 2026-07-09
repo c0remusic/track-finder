@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
-import { chromium } from "playwright";
+import { chromium as playwrightCore } from "playwright-core";
+import chromium from "@sparticuz/chromium";
 import type { Provider, ProviderResult } from "./types";
 
 const AMAZON_SEARCH_URL = "https://www.amazon.com/s";
@@ -18,7 +19,11 @@ export const amazonMusicProvider: Provider = {
 
   async search(query: string): Promise<ProviderResult> {
     try {
-      const browser = await chromium.launch();
+      const browser = await playwrightCore.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      });
       try {
         const context = await browser.newContext({
           userAgent: USER_AGENT,
