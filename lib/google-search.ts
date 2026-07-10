@@ -69,13 +69,22 @@ function extractCandidates(html: string): Candidate[] {
 // (2026-07-10), same class of bot detection as Cloudflare/Akamai on
 // Beatport/Traxsource/Amazon Music. Goes through the same real-browser
 // bypass (lib/browser-fetch.ts) for the same reason.
+//
+// The query is deliberately NOT wrapped in quotes. Quoting forces Google to
+// require a literal exact-substring match on the page, which is stricter
+// than the isRelevantMatch check below and can reject a genuinely correct
+// result over a trivial spelling difference (confirmed real case,
+// 2026-07-10: "Ticon - Mona Bone" on Bandcamp is actually titled "Monda
+// Bone" on the page itself — a quoted search finds zero results even
+// though the unquoted search ranks that exact page first). Relevance is
+// enforced downstream by isRelevantMatch's 50%-token-overlap check instead.
 async function fetchResultsPage(
   query: string,
   siteFilter: string,
   page: number
 ): Promise<string | null> {
   const params = new URLSearchParams({
-    q: `site:${siteFilter} "${query}"`,
+    q: `site:${siteFilter} ${query}`,
     hl: "en",
   });
   if (page > 0) params.set("start", String(page * RESULTS_PER_PAGE));
@@ -85,9 +94,10 @@ async function fetchResultsPage(
 
 /**
  * Second-recourse discovery when a provider's own site search returns
- * nothing: search Google restricted to `siteFilter` for the exact `query`
- * phrase, page 1 then page 2, and return the first result URL that is
- * both plausible (`isPlausibleUrl`), relevant (`isRelevantMatch`
+ * nothing: search Google restricted to `siteFilter` for `query` (unquoted,
+ * so Google's normal relevance ranking applies instead of literal
+ * exact-substring matching), page 1 then page 2, and return the first
+ * result URL that is both plausible (`isPlausibleUrl`), relevant (`isRelevantMatch`
  * against the result title), and on the correct domain (`hostMatches`).
  * Never throws — any failure (network, no candidates) resolves to `null`,
  * which callers must treat as `not_found`, never `error`.
