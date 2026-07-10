@@ -60,10 +60,14 @@ de chargement sont assez simples pour rester inline (Tailwind
   - Micro-interaction sur le bouton de recherche (état pressed/loading).
   Pas d'animation sur le header/logo/toggle (repos visuel, pas de
   mouvement perpétuel — cohérent avec "sobre").
-- **État "pending" → skeleton** au lieu du texte "Recherche…" — un bloc
-  `animate-pulse` (Tailwind natif, pas de dépendance) à la place du futur
-  lien/badge, feedback visuel plus clair qu'une recherche est en cours par
-  ligne (les providers arrivent en flux SSE à des vitesses différentes).
+- **État "pending" → icône de chargement** au lieu du texte "Recherche…".
+  Version initiale : un bloc skeleton `animate-pulse`. **Révisé le
+  2026-07-10** (demande explicite : "ajoute des icônes pour montrer le
+  loading en cours aussi pour les 5") — remplacé par `lucide-react`
+  `Loader2` (`animate-spin`), cohérent avec le spinner déjà utilisé sur le
+  bouton de recherche (`SearchForm.tsx`). `aria-label="Recherche en cours"`
+  conservé et vérifié comme toujours annoncé (lucide-react ne pose
+  `aria-hidden` que si aucune prop a11y n'est fournie).
 - **État vide (avant toute recherche)** : actuellement juste le formulaire
   + le footer, rien entre les deux. Ajout d'un sous-titre sobre sous le
   titre expliquant ce que fait l'outil en une phrase — pas d'illustration

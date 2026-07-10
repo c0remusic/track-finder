@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
+import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { Slot } from "@/lib/providers/types";
@@ -29,8 +30,8 @@ export function AchatSection({ results }: { results: Slot[] }) {
               )}
             </div>
             {r.status === "pending" ? (
-              <span
-                className="h-4 w-16 animate-pulse rounded bg-muted"
+              <Loader2
+                className="size-4 animate-spin text-muted-foreground"
                 aria-label="Recherche en cours"
               />
             ) : (
