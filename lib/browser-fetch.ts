@@ -105,6 +105,18 @@ async function launchBrowser(): Promise<Browser> {
   });
 }
 
+// Every page fetched here is scraped for embedded HTML/JSON data (Beatport's
+// __NEXT_DATA__, Traxsource's DOM, Google's #search links) — never rendered
+// or screenshotted, so images/fonts/media/stylesheets are pure overhead.
+// Blocking them cuts Chromium's peak memory substantially (images are
+// typically the single largest consumer on these product pages) and speeds
+// up every navigation, which matters most on a memory-constrained
+// serverless function where Chromium has been crashing under load
+// (confirmed live 2026-07-10 — see the crash-retry logic below). Doesn't
+// touch "script"/"xhr"/"fetch": Cloudflare's bot-challenge and Beatport's
+// hydration both need JS to run.
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "font", "media", "stylesheet"]);
+
 async function fetchOnce(
   url: string,
   gotoTimeoutMs: number,
@@ -113,6 +125,12 @@ async function fetchOnce(
   const browser = await getSharedBrowser();
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
   try {
+    await context.route("**/*", (route) => {
+      if (BLOCKED_RESOURCE_TYPES.has(route.request().resourceType())) {
+        return route.abort();
+      }
+      return route.continue();
+    });
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });

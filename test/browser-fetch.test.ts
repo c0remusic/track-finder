@@ -25,6 +25,7 @@ function makeBrowser() {
   const context = {
     newPage: vi.fn(),
     addInitScript: vi.fn().mockResolvedValue(undefined),
+    route: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
   };
   const browser = {
@@ -48,6 +49,36 @@ async function freshFetchHtmlViaBrowser() {
 describe("fetchHtmlViaBrowser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("blocks images/fonts/media/stylesheets but allows other resource types", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>ok</html>");
+    context.newPage.mockResolvedValue(page);
+    launchMock.mockResolvedValue(browser);
+
+    await fetchHtmlViaBrowser("https://example.com");
+
+    expect(context.route).toHaveBeenCalledWith("**/*", expect.any(Function));
+    const handler = context.route.mock.calls[0][1];
+
+    const abort = vi.fn();
+    const continue_ = vi.fn();
+    for (const resourceType of ["image", "font", "media", "stylesheet"]) {
+      abort.mockClear();
+      continue_.mockClear();
+      handler({ request: () => ({ resourceType: () => resourceType }), abort, continue: continue_ });
+      expect(abort).toHaveBeenCalled();
+      expect(continue_).not.toHaveBeenCalled();
+    }
+    for (const resourceType of ["document", "script", "xhr", "fetch"]) {
+      abort.mockClear();
+      continue_.mockClear();
+      handler({ request: () => ({ resourceType: () => resourceType }), abort, continue: continue_ });
+      expect(continue_).toHaveBeenCalled();
+      expect(abort).not.toHaveBeenCalled();
+    }
   });
 
   it("returns the page's HTML after navigating", async () => {
