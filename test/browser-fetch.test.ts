@@ -186,10 +186,13 @@ describe("fetchHtmlViaBrowser", () => {
     const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
     const first = makeBrowser();
     const crashingPage = makePage("<html>unused</html>");
-    crashingPage.goto.mockImplementation(() => {
-      first.browser.isConnected.mockReturnValue(false);
-      return Promise.reject(new Error("page.goto: Target page, context or browser has been closed"));
-    });
+    // Regression (confirmed live 2026-07-10): isConnected() does NOT
+    // reliably flip to false when the shared browser dies this way — the
+    // retry must trigger off Playwright's own error message instead, so
+    // isConnected() is deliberately left reporting true here.
+    crashingPage.goto.mockRejectedValue(
+      new Error("page.goto: Target page, context or browser has been closed")
+    );
     first.context.newPage.mockResolvedValue(crashingPage);
 
     const second = makeBrowser();
@@ -203,14 +206,27 @@ describe("fetchHtmlViaBrowser", () => {
     expect(launchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not retry when the browser is still alive and the failure is an ordinary navigation error", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>unused</html>");
+    page.goto.mockRejectedValue(new Error("page.goto: Timeout 10000ms exceeded"));
+    context.newPage.mockResolvedValue(page);
+    launchMock.mockResolvedValue(browser);
+
+    const result = await fetchHtmlViaBrowser("https://example.com");
+
+    expect(result).toBeNull();
+    expect(launchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("gives up after the retry also fails against the freshly relaunched browser", async () => {
     const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
     const first = makeBrowser();
     const crashingPage = makePage("<html>unused</html>");
-    crashingPage.goto.mockImplementation(() => {
-      first.browser.isConnected.mockReturnValue(false);
-      return Promise.reject(new Error("crashed"));
-    });
+    crashingPage.goto.mockRejectedValue(
+      new Error("browserContext.newPage: Target page, context or browser has been closed")
+    );
     first.context.newPage.mockResolvedValue(crashingPage);
 
     const second = makeBrowser();

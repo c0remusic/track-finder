@@ -125,6 +125,13 @@ async function launchBrowser(): Promise<Browser> {
   });
 }
 
+// Playwright's own message for "the browser/context this call belongs to
+// died" — distinct from ordinary navigation failures (timeouts, DNS,
+// bot-block challenges), which throw with different messages entirely.
+function isSharedBrowserClosedError(err: unknown): boolean {
+  return err instanceof Error && /Target page, context or browser has been closed/.test(err.message);
+}
+
 // Every page fetched here is scraped for embedded HTML/JSON data (Beatport's
 // __NEXT_DATA__, Traxsource's DOM, Google's #search links) — never rendered
 // or screenshotted, so images/fonts/media/stylesheets are pure overhead.
@@ -183,23 +190,20 @@ export async function fetchHtmlViaBrowser(
     try {
       return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
     } catch (err) {
-      // TEMP DIAGNOSTIC (2026-07-10, round 3): pinning playwright-core to
-      // 1.56.1 / @sparticuz/chromium to 141.0.0 (matched pre-Chrome-for-
-      // Testing pair) did not resolve the failures either. Need to confirm
-      // whether the error signature actually changed at all.
-      console.error("[browser-fetch] fetchOnce failed (attempt 1)", url, err);
       // The shared Chromium process can crash mid-request (confirmed live
-      // 2026-07-10: "Target page, context or browser has been closed"
-      // mid-navigation/mid-wait) — every provider mid-flight against that
-      // browser fails together unless the dead reference is dropped and a
-      // fresh one launched. Retry exactly once, and only when the browser
-      // is confirmed dead; an ordinary navigation failure (real bot-block,
-      // real timeout) with the browser still alive isn't worth doubling
-      // the latency for. Confirmed live 2026-07-10 that even the freshly
-      // relaunched browser can crash again just as fast — this retry
-      // recovers some cases but is not a full fix for what's most likely
-      // a serverless function memory ceiling (see CLAUDE.md).
-      if (sharedBrowser && !sharedBrowser.isConnected()) {
+      // 2026-07-10: "Target page, context or browser has been closed" at
+      // newPage/goto/waitForTimeout) — every provider mid-flight against
+      // that browser fails together unless the dead reference is dropped
+      // and a fresh one launched. `sharedBrowser.isConnected()` does NOT
+      // reliably reflect this crash — confirmed live that it kept
+      // reporting connected while every subsequent provider in the same
+      // request hit the identical error, which meant this retry never
+      // actually fired in production despite looking correct. Detecting
+      // the crash from Playwright's own error message instead is the
+      // reliable signal; an ordinary navigation failure (real bot-block,
+      // real timeout) has a different message and isn't retried, so this
+      // doesn't add latency to the common case.
+      if (isSharedBrowserClosedError(err)) {
         sharedBrowser = null;
         try {
           return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
