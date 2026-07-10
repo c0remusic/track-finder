@@ -57,13 +57,17 @@ export function AchatSection({ results }: { results: Slot[] }) {
                   >
                     Voir l&apos;offre
                   </a>
-                ) : r.status === "not_found" ? (
-                  // Distinct from "error": the search genuinely ran and found
-                  // nothing relevant — not a technical failure, so neutral
-                  // styling rather than the destructive badge used for "error".
-                  <Badge variant="secondary">Non trouvé</Badge>
                 ) : (
-                  <Badge variant="destructive">Indisponible pour l&apos;instant</Badge>
+                  // `not_found` (search ran, nothing relevant) and `error`
+                  // (technical failure, usually anti-bot) both mean the same
+                  // thing to a non-technical user — "can't buy it here right
+                  // now" — and neither is actionable by them. A red
+                  // "destructive" badge for `error` read as "the app is
+                  // broken" in practice (audit finding, 2026-07-10); the
+                  // status distinction stays in the data (`r.status`, still
+                  // visible in logs/devtools) but the two collapse to one
+                  // neutral badge in the UI.
+                  <Badge variant="secondary">Non disponible</Badge>
                 )}
               </motion.span>
             )}

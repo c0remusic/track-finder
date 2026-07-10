@@ -78,6 +78,13 @@ export default function Home() {
       )}
       <SearchForm onSearch={handleSearch} isLoading={isLoading} />
 
+      {isLoading && (
+        // An unexplained multi-second wait reads as slower than an explained
+        // one (audit finding, 2026-07-10) — the SSE stream below already
+        // fills in progressively, this just names what's happening.
+        <p className="mt-4 text-sm text-muted-foreground">Recherche sur 5 plateformes…</p>
+      )}
+
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
       {slots && (
