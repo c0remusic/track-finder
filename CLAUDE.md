@@ -102,6 +102,19 @@ silencieux), incarnée concrètement dans ce code :
   Bandcamp : `bcsearch_public_api` contourne entièrement le CAPTCHA public)
   ou un `__NEXT_DATA__` embarqué (voir Beatport) — moins fragile, moins de
   risque légal, pas de navigateur à maintenir.
+- **`@sparticuz/chromium` est un binaire Lambda-only** — ne se lance jamais
+  en local sur Windows (`spawn ...\Temp\chromium ENOENT`, confirmé
+  2026-07-10). Tout provider scrapé via Playwright doit passer par
+  `lib/browser-fetch.ts`, qui branche sur `process.env.VERCEL` (Chromium
+  Lambda en prod, Edge système en local via l'option `channel` de
+  `playwright-core` — aucun téléchargement supplémentaire).
+- **Le blocage Cloudflare/Akamai est probabiliste, pas un test binaire**
+  (score de confiance IP/comportemental côté anti-bot) — un taux d'échec
+  résiduel sur Beatport/Traxsource/Amazon Music est normal même avec les
+  contre-mesures anti-détection en place (`browser-fetch.ts` : masquage
+  `navigator.webdriver`, `--disable-blink-features=AutomationControlled`).
+  Ne pas traiter un `error` occasionnel sur ces 3 providers comme une
+  régression sans vérifier d'abord si ça se reproduit.
 
 ## Risque légal (scraping)
 
@@ -133,6 +146,10 @@ et `itunes.apple.com/search`), risque ToS nul pour ces deux-là.
 - `UPSTASH_REDIS_REST_URL`/`TOKEN` optionnelles — absentes, le rate
   limiting tourne en mode "toujours autorisé" (fail-open), l'app reste
   pleinement fonctionnelle.
+- **Le cap par défaut d'une function serverless est 10s sur le plan
+  Hobby** (60s max configurable) — toute route dont le budget interne peut
+  dépasser ça doit déclarer `export const maxDuration`. `/api/search` est à
+  20s depuis le 2026-07-10 (3 providers Playwright à 15s de budget chacun).
 
 ## Index des documents docs/
 

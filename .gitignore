@@ -39,6 +39,9 @@ yarn-error.log*
 # superpowers scratch (progress ledger, task briefs/reports)
 .superpowers/
 
+# personal/ephemeral notes, not for the team
+CLAUDE.local.md
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
