@@ -40,12 +40,15 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 // to a plain `fetch` that Cloudflare does), each with a default
 // `gotoTimeoutMs` of 10s — 30s of goto budget alone before counting launch
 // overhead or queueing. All Playwright-driven providers now draw from a
-// single shared pool of `MAX_CONCURRENT_PAGES = 2` page slots in
-// browser-fetch.ts (not a per-provider limit — lowered from 3 on
-// 2026-07-10 after the shared `--single-process` Chromium was confirmed
-// crashing under 3-way concurrent page load in production), so up to 4
-// providers' simultaneous first calls can mean two queue behind the other
-// two's page opens before their own chain even starts. browser-fetch.ts
+// single shared pool of `MAX_CONCURRENT_PAGES = 1` page slots in
+// browser-fetch.ts (not a per-provider limit — lowered 3 → 2 → 1 on
+// 2026-07-10: the shared `--single-process` Chromium kept crashing under
+// concurrent page load in production at both 3 and 2, even after ruling
+// out a playwright-core/@sparticuz/chromium version mismatch as the cause —
+// fully serializing page opens is the last concurrency-side lever before
+// concluding this needs a paid-tier resource bump), so all 4 providers'
+// simultaneous first calls fully serialize through one page slot before
+// their own chain even starts. browser-fetch.ts
 // also now retries once against a freshly relaunched browser if the shared
 // one crashes mid-call, which can itself add up to one more full
 // launch+goto cycle on top of the worst case below. The budgets below

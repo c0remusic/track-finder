@@ -231,37 +231,30 @@ describe("fetchHtmlViaBrowser", () => {
     const { browser, context } = makeBrowser();
     launchMock.mockResolvedValue(browser);
 
-    const pages = [makePage("<html>1</html>"), makePage("<html>2</html>"), makePage("<html>3</html>")];
+    const pages = [makePage("<html>1</html>"), makePage("<html>2</html>")];
     let resolveFirstGoto: () => void = () => {};
     pages[0].goto.mockImplementation(
       () => new Promise<void>((resolve) => (resolveFirstGoto = resolve))
     );
-    pages[1].goto.mockImplementation(() => new Promise<void>(() => {})); // stays pending, released at the end
-    // pages[2] (the queued 3rd call) resolves immediately once it gets a slot.
+    // pages[1] (the queued 2nd call) resolves immediately once it gets a slot.
 
     let callIndex = 0;
     context.newPage.mockImplementation(() => Promise.resolve(pages[callIndex++]));
 
     const p1 = fetchHtmlViaBrowser("https://example.com/1");
     const p2 = fetchHtmlViaBrowser("https://example.com/2");
-    const p3 = fetchHtmlViaBrowser("https://example.com/3");
 
-    // MAX_CONCURRENT_PAGES = 2 — the 3rd call's newPage() should not have
+    // MAX_CONCURRENT_PAGES = 1 — the 2nd call's newPage() should not have
     // been reached yet.
-    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(2));
-    expect(context.newPage).not.toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(1));
+    expect(context.newPage).not.toHaveBeenCalledTimes(2);
 
     resolveFirstGoto();
     await p1;
-    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(2));
 
-    const result3 = await p3;
-    expect(result3).toBe("<html>3</html>");
+    const result2 = await p2;
+    expect(result2).toBe("<html>2</html>");
 
-    // Free the still-pending call so no state leaks into later tests in
-    // this file (module state persists unless freshFetchHtmlViaBrowser
-    // resets it, which the next test will do independently — but nothing
-    // here should keep unresolved promises alive after this test ends).
-    void p2;
   });
 });

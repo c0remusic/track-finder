@@ -71,16 +71,18 @@ async function getSharedBrowser(): Promise<Browser> {
 // triggering at once) could still contend for CPU. The cap is looser than
 // the old per-browser-process limit since the unit is cheaper now.
 //
-// Lowered from 3 to 2 (2026-07-10): confirmed live in production that 3
-// concurrent pages against the shared `--single-process` Chromium (the
-// @sparticuz/chromium default, chosen for its own lower memory footprint)
-// crashed the browser mid-navigation under real concurrent load — visible
-// as "Target page, context or browser has been closed" errors that took
-// every provider racing that same browser down together, sometimes
-// surviving the one-retry recovery in fetchHtmlViaBrowser but crashing
-// again on the retry too. This trades a bit of speed under heavy
-// concurrency for not exceeding the serverless function's memory budget.
-const MAX_CONCURRENT_PAGES = 2;
+// Lowered to 1 (2026-07-10): 3, then 2, concurrent pages against the shared
+// `--single-process` Chromium (the @sparticuz/chromium default, chosen for
+// its own lower memory footprint) both still crashed mid-navigation under
+// real concurrent load ("Target page, context or browser has been closed"),
+// even after ruling out a playwright-core/@sparticuz/chromium version
+// mismatch as the cause (pinned to a matched pair, same crash persisted
+// unchanged) and even against a freshly relaunched browser. `--single-
+// process` runs the browser and every renderer in one OS process/thread
+// pool — inherently more fragile under ANY concurrent page creation, not
+// just at high counts. Fully serializing page opens is the next real test
+// of that theory before concluding this needs a paid-tier memory bump.
+const MAX_CONCURRENT_PAGES = 1;
 let activePages = 0;
 const pageSlotWaiters: (() => void)[] = [];
 
