@@ -23,4 +23,18 @@ describe("isRelevantMatch", () => {
   it("treats an empty query as always relevant (nothing to check against)", () => {
     expect(isRelevantMatch("", "Anything At All")).toBe(true);
   });
+
+  it("does not match a query token as a substring inside an unrelated longer word", () => {
+    // "hood" must not match inside "brotherhood" — exact-token comparison,
+    // not string .includes().
+    expect(isRelevantMatch("Robert Hood Minus", "Brotherhood Records — Some Track")).toBe(false);
+  });
+
+  it("matches non-Latin-script queries instead of silently bypassing the check", () => {
+    // An all-non-Latin query must not reduce to zero significant tokens and
+    // hit the empty-query early return — that would bypass the check
+    // entirely for these queries.
+    expect(isRelevantMatch("坂本龍一 戦場のメリークリスマス", "坂本龍一 — 戦場のメリークリスマス")).toBe(true);
+    expect(isRelevantMatch("坂本龍一 戦場のメリークリスマス", "Coffee Breath — Unrelated Track")).toBe(false);
+  });
 });
