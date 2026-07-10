@@ -25,36 +25,6 @@ describe("aggregateSearch", () => {
     expect(result.purchase.map((r) => r.platform).sort()).toEqual(["A", "C"]);
   });
 
-  it("merges metadata across found providers, keeping conflicting values with their source", async () => {
-    const providers: Provider[] = [
-      fakeProvider({
-        name: "A",
-        search: async () => ({
-          platform: "A",
-          status: "found",
-          purchaseUrl: "https://a.example/x",
-          metadata: { bpm: 133 },
-        }),
-      }),
-      fakeProvider({
-        name: "B",
-        search: async () => ({
-          platform: "B",
-          status: "found",
-          purchaseUrl: "https://b.example/y",
-          metadata: { bpm: 134 },
-        }),
-      }),
-    ];
-
-    const result = await aggregateSearch("query-metadata-merge", providers);
-
-    expect(result.metadata.bpm).toEqual([
-      { value: 133, source: "A" },
-      { value: 134, source: "B" },
-    ]);
-  });
-
   it("isolates a provider that throws instead of failing the whole search", async () => {
     const providers: Provider[] = [
       fakeProvider({

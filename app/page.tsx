@@ -3,21 +3,12 @@
 import { useRef, useState } from "react";
 import { SearchForm } from "@/components/SearchForm";
 import { AchatSection } from "@/components/AchatSection";
-import { MetadataSection } from "@/components/MetadataSection";
 import { Disclaimer } from "@/components/Disclaimer";
 import { PROVIDER_NAMES } from "@/lib/providers/names";
 import type { ProviderResult, Slot } from "@/lib/providers/types";
 
-type Metadata = {
-  bpm: { value: number; source: string }[];
-  key: { value: string; source: string }[];
-  genre: { value: string; source: string }[];
-  label: { value: string; source: string }[];
-};
-
 export default function Home() {
   const [slots, setSlots] = useState<Record<string, Slot> | null>(null);
-  const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +28,6 @@ export default function Home() {
 
     setIsLoading(true);
     setError(null);
-    setMetadata(null);
     setSlots(
       Object.fromEntries(
         PROVIDER_NAMES.map((name) => [name, { platform: name, status: "pending" as const }])
@@ -53,11 +43,9 @@ export default function Home() {
       setSlots((prev) => (prev ? { ...prev, [result.platform]: result } : prev));
     });
 
-    source.addEventListener("done", (event) => {
+    source.addEventListener("done", () => {
       source.close();
       if (currentTokenRef.current !== token) return;
-      const { metadata: finalMetadata } = JSON.parse(event.data) as { metadata: Metadata };
-      setMetadata(finalMetadata);
       setIsLoading(false);
     });
 
@@ -83,10 +71,6 @@ export default function Home() {
           <section>
             <h2 className="mb-3 text-lg font-medium">Où acheter</h2>
             <AchatSection results={orderedSlots} />
-          </section>
-          <section>
-            <h2 className="mb-3 text-lg font-medium">Metadata</h2>
-            <MetadataSection metadata={metadata} />
           </section>
         </div>
       )}

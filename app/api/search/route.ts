@@ -4,18 +4,8 @@ import type { Provider, ProviderResult } from "../../../lib/providers/types";
 import { TtlCache } from "../../../lib/cache";
 import { checkRateLimit } from "../../../lib/rate-limit";
 
-type MetadataValue<T> = { value: T; source: string };
-
-type AggregatedMetadata = {
-  bpm: MetadataValue<number>[];
-  key: MetadataValue<string>[];
-  genre: MetadataValue<string>[];
-  label: MetadataValue<string>[];
-};
-
 type AggregatedResult = {
   purchase: ProviderResult[];
-  metadata: AggregatedMetadata;
   // Every provider's raw result, including `not_found` ones — kept so a
   // cache hit can replay the exact same per-provider events a live run
   // would have emitted (see `onProviderResult` below), not just the
@@ -62,19 +52,6 @@ async function runProvider(
   }
 }
 
-function buildMetadata(results: ProviderResult[]): AggregatedMetadata {
-  const metadata: AggregatedMetadata = { bpm: [], key: [], genre: [], label: [] };
-  for (const result of results) {
-    if (result.status !== "found" || !result.metadata) continue;
-    const { bpm, key, genre, label } = result.metadata;
-    if (bpm !== undefined) metadata.bpm.push({ value: bpm, source: result.platform });
-    if (key !== undefined) metadata.key.push({ value: key, source: result.platform });
-    if (genre !== undefined) metadata.genre.push({ value: genre, source: result.platform });
-    if (label !== undefined) metadata.label.push({ value: label, source: result.platform });
-  }
-  return metadata;
-}
-
 export async function aggregateSearch(
   query: string,
   providers: Provider[] = allProviders,
@@ -101,9 +78,8 @@ export async function aggregateSearch(
   );
 
   const purchase = results.filter((r) => r.status !== "not_found");
-  const metadata = buildMetadata(results);
 
-  const aggregated: AggregatedResult = { purchase, metadata, all: results };
+  const aggregated: AggregatedResult = { purchase, all: results };
   searchCache.set(cacheKey, aggregated);
   return aggregated;
 }
@@ -147,7 +123,7 @@ export async function GET(request: NextRequest) {
       };
 
       try {
-        const { metadata } = await aggregateSearch(
+        await aggregateSearch(
           query,
           allProviders,
           DEFAULT_PROVIDER_TIMEOUT_MS,
@@ -155,7 +131,7 @@ export async function GET(request: NextRequest) {
         );
 
         if (!cancelled) {
-          send("done", { metadata });
+          send("done", {});
           controller.close();
         }
       } catch (err) {
