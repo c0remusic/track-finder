@@ -7,36 +7,13 @@ const fixtureHtml = readFileSync(
   "utf-8"
 );
 
-const { launchMock } = vi.hoisted(() => ({ launchMock: vi.fn() }));
-
-vi.mock("playwright-core", () => ({
-  chromium: { launch: launchMock },
+vi.mock("../../lib/browser-fetch", () => ({
+  fetchHtmlViaBrowser: vi.fn(),
 }));
 
-vi.mock("@sparticuz/chromium", () => ({
-  default: {
-    args: [],
-    executablePath: vi.fn().mockResolvedValue("/mock/chromium"),
-  },
-}));
-
+const { fetchHtmlViaBrowser } = await import("../../lib/browser-fetch");
 const { amazonMusicProvider } = await import("../../lib/providers/amazon-music");
-
-function makeBrowser(html: string) {
-  const page = {
-    goto: vi.fn().mockResolvedValue(undefined),
-    waitForTimeout: vi.fn().mockResolvedValue(undefined),
-    content: vi.fn().mockResolvedValue(html),
-  };
-  const context = {
-    newPage: vi.fn().mockResolvedValue(page),
-  };
-  const browser = {
-    newContext: vi.fn().mockResolvedValue(context),
-    close: vi.fn().mockResolvedValue(undefined),
-  };
-  return browser;
-}
+const mockBrowserFetch = vi.mocked(fetchHtmlViaBrowser);
 
 describe("amazonMusicProvider", () => {
   afterEach(() => {
@@ -44,7 +21,7 @@ describe("amazonMusicProvider", () => {
   });
 
   it("maps the first search result to ProviderResult", async () => {
-    launchMock.mockResolvedValue(makeBrowser(fixtureHtml));
+    mockBrowserFetch.mockResolvedValue(fixtureHtml);
 
     const result = await amazonMusicProvider.search("Robert Hood Minus");
 
@@ -58,8 +35,8 @@ describe("amazonMusicProvider", () => {
     });
   });
 
-  it("returns error when Playwright throws", async () => {
-    launchMock.mockRejectedValue(new Error("launch failed"));
+  it("returns error when the browser fetch fails", async () => {
+    mockBrowserFetch.mockResolvedValue(null);
 
     const result = await amazonMusicProvider.search("anything");
 

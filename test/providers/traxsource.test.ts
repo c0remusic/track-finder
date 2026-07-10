@@ -1,23 +1,28 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { traxsourceProvider } from "../../lib/providers/traxsource";
 
 const fixture = readFileSync(
   join(__dirname, "../fixtures/traxsource-search.html"),
   "utf-8"
 );
 
+vi.mock("../../lib/browser-fetch", () => ({
+  fetchHtmlViaBrowser: vi.fn(),
+}));
+
+const { fetchHtmlViaBrowser } = await import("../../lib/browser-fetch");
+const { traxsourceProvider } = await import("../../lib/providers/traxsource");
+const mockBrowserFetch = vi.mocked(fetchHtmlViaBrowser);
+
 describe("traxsourceProvider", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   it("parses the first result row from the fixture", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => fixture })
-    );
+    mockBrowserFetch.mockResolvedValue(fixture);
 
     const result = await traxsourceProvider.search("Robert Hood Minus");
 
@@ -39,11 +44,14 @@ describe("traxsourceProvider", () => {
   });
 
   it("returns not_found when no .trk-row is present", async () => {
+    mockBrowserFetch.mockResolvedValue(
+      "<html><body><div class=\"search-list-cont\"></div></body></html>"
+    );
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        text: async () => "<html><body><div class=\"search-list-cont\"></div></body></html>",
+        text: async () => `<html><body><div id="search"></div></body></html>`,
       })
     );
 
@@ -52,8 +60,8 @@ describe("traxsourceProvider", () => {
     expect(result).toEqual({ platform: "Traxsource", status: "not_found" });
   });
 
-  it("returns error when the request fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("blocked")));
+  it("returns error when the browser fetch fails", async () => {
+    mockBrowserFetch.mockResolvedValue(null);
 
     const result = await traxsourceProvider.search("anything");
 
@@ -68,19 +76,19 @@ describe("traxsourceProvider", () => {
     const emptySearchHtml = "<html><body><div class=\"search-list-cont\"></div></body></html>";
     const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.traxsource.com/track/1809532/minus?srsltid=abc"><h3>Robert Hood - Minus [Tresor Records]</h3></a></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
+    mockBrowserFetch.mockImplementation((url: string) => {
       if (url.startsWith("https://www.traxsource.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
-      }
-      if (url.startsWith("https://www.google.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => googleResultsHtml });
+        return Promise.resolve(emptySearchHtml);
       }
       if (url === "https://www.traxsource.com/track/1809532/minus") {
-        return Promise.resolve({ ok: true, text: async () => productFixture });
+        return Promise.resolve(productFixture);
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      throw new Error(`unexpected browser fetch: ${url}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
+    );
 
     const result = await traxsourceProvider.search("Robert Hood Minus");
 
@@ -104,13 +112,11 @@ describe("traxsourceProvider", () => {
     const emptySearchHtml = "<html><body><div class=\"search-list-cont\"></div></body></html>";
     const emptyGoogleHtml = `<!DOCTYPE html><html><body><div id="search"></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url.startsWith("https://www.traxsource.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
-      }
-      return Promise.resolve({ ok: true, text: async () => emptyGoogleHtml });
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    mockBrowserFetch.mockResolvedValue(emptySearchHtml);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => emptyGoogleHtml })
+    );
 
     const result = await traxsourceProvider.search("asdkjaskdjaskdj");
 
@@ -121,16 +127,16 @@ describe("traxsourceProvider", () => {
     const emptySearchHtml = "<html><body><div class=\"search-list-cont\"></div></body></html>";
     const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.traxsource.com/track/1809532/minus?srsltid=abc"><h3>Robert Hood - Minus [Tresor Records]</h3></a></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
+    mockBrowserFetch.mockImplementation((url: string) => {
       if (url.startsWith("https://www.traxsource.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
+        return Promise.resolve(emptySearchHtml);
       }
-      if (url.startsWith("https://www.google.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => googleResultsHtml });
-      }
-      return Promise.resolve({ ok: false });
+      return Promise.resolve(null);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
+    );
 
     const result = await traxsourceProvider.search("Robert Hood Minus");
 

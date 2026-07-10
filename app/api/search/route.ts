@@ -4,6 +4,12 @@ import type { Provider, ProviderResult } from "../../../lib/providers/types";
 import { TtlCache } from "../../../lib/cache";
 import { checkRateLimit } from "../../../lib/rate-limit";
 
+// Vercel's default serverless function duration is 10s (Hobby plan) — below
+// the 15s per-provider timeout budget the Playwright-based providers now get
+// (see PROVIDER_TIMEOUT_OVERRIDES_MS below). Without this, Vercel would kill
+// the function before those providers' timeout race even resolves.
+export const maxDuration = 20;
+
 type AggregatedResult = {
   purchase: ProviderResult[];
   // Every provider's raw result, including `not_found` ones — kept so a
@@ -24,11 +30,21 @@ const searchCache = new TtlCache<AggregatedResult>(ONE_HOUR_MS);
 // regardless of what the slow provider's promise eventually does.
 const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 
+// Providers that go through a real Chromium instance (see lib/browser-fetch.ts)
+// need more budget than a plain `fetch` — browser launch + navigation alone
+// can take several seconds before any parsing even starts.
+const PROVIDER_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
+  "Amazon Music": 15000,
+  Beatport: 15000,
+  Traxsource: 15000,
+};
+
 async function runProvider(
   provider: Provider,
   query: string,
   timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
 ): Promise<ProviderResult> {
+  timeoutMs = PROVIDER_TIMEOUT_OVERRIDES_MS[provider.name] ?? timeoutMs;
   const timeoutResult: ProviderResult = { platform: provider.name, status: "error" };
 
   let timer: ReturnType<typeof setTimeout>;

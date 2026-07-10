@@ -1,4 +1,5 @@
 import { findViaGoogle } from "../google-search";
+import { fetchHtmlViaBrowser } from "../browser-fetch";
 import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
@@ -70,19 +71,10 @@ function productPageTrack(nextData: unknown): BeatportProductTrack | null {
 }
 
 async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
-  let html: string;
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(3000),
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
-    });
-    // A Google-found URL that's now unreachable is "no usable result", not
-    // a Beatport-side technical failure — stays not_found, never error.
-    if (!response.ok) return { platform: "Beatport", status: "not_found" };
-    html = await response.text();
-  } catch {
-    return { platform: "Beatport", status: "not_found" };
-  }
+  // A Google-found URL that's now unreachable is "no usable result", not a
+  // Beatport-side technical failure — stays not_found, never error.
+  const html = await fetchHtmlViaBrowser(url);
+  if (!html) return { platform: "Beatport", status: "not_found" };
 
   const nextData = extractNextData(html);
   if (!nextData) return { platform: "Beatport", status: "not_found" };
@@ -129,17 +121,8 @@ export const beatportProvider: Provider = {
   async search(query: string): Promise<ProviderResult> {
     const url = `${BEATPORT_SEARCH_URL}?q=${encodeURIComponent(query)}`;
 
-    let html: string;
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(8000),
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
-      });
-      if (!response.ok) return { platform: "Beatport", status: "error" };
-      html = await response.text();
-    } catch {
-      return { platform: "Beatport", status: "error" };
-    }
+    const html = await fetchHtmlViaBrowser(url);
+    if (!html) return { platform: "Beatport", status: "error" };
 
     const nextData = extractNextData(html);
     if (!nextData) return { platform: "Beatport", status: "error" };

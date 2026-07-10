@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { beatportProvider } from "../../lib/providers/beatport";
 
 const fixtureData = readFileSync(
   join(__dirname, "../fixtures/beatport-search.json"),
@@ -9,16 +8,22 @@ const fixtureData = readFileSync(
 );
 const fixtureHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">${fixtureData}</script></body></html>`;
 
+vi.mock("../../lib/browser-fetch", () => ({
+  fetchHtmlViaBrowser: vi.fn(),
+}));
+
+const { fetchHtmlViaBrowser } = await import("../../lib/browser-fetch");
+const { beatportProvider } = await import("../../lib/providers/beatport");
+const mockBrowserFetch = vi.mocked(fetchHtmlViaBrowser);
+
 describe("beatportProvider", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   it("parses the first track from the embedded __NEXT_DATA__ JSON", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => fixtureHtml })
-    );
+    mockBrowserFetch.mockResolvedValue(fixtureHtml);
 
     const result = await beatportProvider.search("Robert Hood Minus");
 
@@ -41,9 +46,13 @@ describe("beatportProvider", () => {
 
   it("returns not_found when __NEXT_DATA__ has zero tracks", async () => {
     const emptyHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
+    mockBrowserFetch.mockResolvedValue(emptyHtml);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => emptyHtml })
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => `<html><body><div id="search"></div></body></html>`,
+      })
     );
 
     const result = await beatportProvider.search("asdkjaskdjaskdj");
@@ -51,11 +60,8 @@ describe("beatportProvider", () => {
     expect(result).toEqual({ platform: "Beatport", status: "not_found" });
   });
 
-  it("returns error when __NEXT_DATA__ is missing entirely", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => "<html></html>" })
-    );
+  it("returns error when the browser fetch fails", async () => {
+    mockBrowserFetch.mockResolvedValue(null);
 
     const result = await beatportProvider.search("anything");
 
@@ -71,19 +77,19 @@ describe("beatportProvider", () => {
     const emptySearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
     const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.beatport.com/track/minus/11595385?srsltid=abc"><h3>Robert Hood - Minus (Original Mix) [Tresor Records]</h3></a></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
+    mockBrowserFetch.mockImplementation((url: string) => {
       if (url.startsWith("https://www.beatport.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
-      }
-      if (url.startsWith("https://www.google.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => googleResultsHtml });
+        return Promise.resolve(emptySearchHtml);
       }
       if (url === "https://www.beatport.com/track/minus/11595385") {
-        return Promise.resolve({ ok: true, text: async () => productHtml });
+        return Promise.resolve(productHtml);
       }
-      throw new Error(`unexpected fetch: ${url}`);
+      throw new Error(`unexpected browser fetch: ${url}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
+    );
 
     const result = await beatportProvider.search("Robert Hood Minus");
 
@@ -108,13 +114,11 @@ describe("beatportProvider", () => {
     const emptySearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
     const emptyGoogleHtml = `<!DOCTYPE html><html><body><div id="search"></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url.startsWith("https://www.beatport.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
-      }
-      return Promise.resolve({ ok: true, text: async () => emptyGoogleHtml });
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    mockBrowserFetch.mockResolvedValue(emptySearchHtml);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => emptyGoogleHtml })
+    );
 
     const result = await beatportProvider.search("asdkjaskdjaskdj");
 
@@ -125,16 +129,16 @@ describe("beatportProvider", () => {
     const emptySearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
     const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.beatport.com/track/minus/11595385?srsltid=abc"><h3>Robert Hood - Minus (Original Mix) [Tresor Records]</h3></a></div></body></html>`;
 
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
+    mockBrowserFetch.mockImplementation((url: string) => {
       if (url.startsWith("https://www.beatport.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => emptySearchHtml });
+        return Promise.resolve(emptySearchHtml);
       }
-      if (url.startsWith("https://www.google.com/search")) {
-        return Promise.resolve({ ok: true, text: async () => googleResultsHtml });
-      }
-      return Promise.resolve({ ok: false });
+      return Promise.resolve(null);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
+    );
 
     const result = await beatportProvider.search("Robert Hood Minus");
 

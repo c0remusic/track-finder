@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { isRelevantMatch } from "../relevance";
 import { findViaGoogle } from "../google-search";
+import { fetchHtmlViaBrowser } from "../browser-fetch";
 import type { Provider, ProviderResult } from "./types";
 
 const TRAXSOURCE_SEARCH_URL = "https://www.traxsource.com/search";
@@ -62,19 +63,10 @@ function parseProductPage(html: string): TraxsourceProductTrack | null {
 }
 
 async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
-  let html: string;
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(3000),
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
-    });
-    // A Google-found URL that's now unreachable is "no usable result", not
-    // a Traxsource-side technical failure — stays not_found, never error.
-    if (!response.ok) return { platform: "Traxsource", status: "not_found" };
-    html = await response.text();
-  } catch {
-    return { platform: "Traxsource", status: "not_found" };
-  }
+  // A Google-found URL that's now unreachable is "no usable result", not a
+  // Traxsource-side technical failure — stays not_found, never error.
+  const html = await fetchHtmlViaBrowser(url);
+  if (!html) return { platform: "Traxsource", status: "not_found" };
 
   const track = parseProductPage(html);
   if (!track) return { platform: "Traxsource", status: "not_found" };
@@ -105,15 +97,10 @@ export const traxsourceProvider: Provider = {
   async search(query: string): Promise<ProviderResult> {
     const url = `${TRAXSOURCE_SEARCH_URL}?term=${encodeURIComponent(query)}`;
 
-    let html: string;
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(6000),
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
-      });
-      if (!response.ok) return { platform: "Traxsource", status: "error" };
-      html = await response.text();
+    const html = await fetchHtmlViaBrowser(url);
+    if (!html) return { platform: "Traxsource", status: "error" };
 
+    try {
       const $ = cheerio.load(html);
       const firstRow = $(".trk-row").first();
       if (firstRow.length === 0) {
