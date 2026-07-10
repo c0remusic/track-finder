@@ -18,6 +18,38 @@ const USER_AGENT =
 // low-cost baseline.
 const ANTI_DETECTION_ARGS = ["--disable-blink-features=AutomationControlled"];
 
+// A single search can trigger several providers' Playwright fallbacks at
+// once (Beatport, Traxsource, Bandcamp, Amazon Music all go through this
+// module) — without a cap, a query that fails everywhere can spin up 6-8
+// concurrent Chromium instances, which starves the event loop badly enough
+// that setTimeout-based timeouts fire late too (verified live 2026-07-10:
+// a single request took 24s wall-clock and 4 providers all mis-reported
+// "error" instead of a clean "not_found", despite each having an 18s
+// budget). Queueing extra launches behind a small concurrency cap keeps
+// each running browser's CPU/memory share high enough to behave
+// predictably, at the cost of some queued providers waiting longer.
+const MAX_CONCURRENT_BROWSERS = 2;
+let activeBrowsers = 0;
+const browserSlotWaiters: (() => void)[] = [];
+
+function acquireBrowserSlot(): Promise<void> {
+  if (activeBrowsers < MAX_CONCURRENT_BROWSERS) {
+    activeBrowsers++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    browserSlotWaiters.push(() => {
+      activeBrowsers++;
+      resolve();
+    });
+  });
+}
+
+function releaseBrowserSlot(): void {
+  activeBrowsers--;
+  browserSlotWaiters.shift()?.();
+}
+
 async function launchBrowser(): Promise<Browser> {
   // @sparticuz/chromium bundles a Chromium binary built for AWS Lambda's
   // Amazon Linux runtime (which Vercel's serverless functions also run on)
@@ -50,6 +82,7 @@ export async function fetchHtmlViaBrowser(
 ): Promise<string | null> {
   const { gotoTimeoutMs = 10000, postGotoWaitMs = 0 } = opts;
 
+  await acquireBrowserSlot();
   try {
     const browser = await launchBrowser();
     try {
@@ -66,5 +99,7 @@ export async function fetchHtmlViaBrowser(
     }
   } catch {
     return null;
+  } finally {
+    releaseBrowserSlot();
   }
 }

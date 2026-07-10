@@ -122,6 +122,21 @@ silencieux), incarnée concrètement dans ce code :
   `navigator.webdriver`, `--disable-blink-features=AutomationControlled`).
   Ne pas traiter un `error` occasionnel sur ces 3 providers comme une
   régression sans vérifier d'abord si ça se reproduit.
+- **Google aussi bloque le `fetch` brut** (même famille de détection que
+  Cloudflare — confirmé 2026-07-10 : page de challenge "enablejs" servie à
+  un `fetch` Node, résultats réels obtenus via un vrai navigateur).
+  `lib/google-search.ts` passe donc par `lib/browser-fetch.ts` comme les
+  providers scrapés. `MAX_PAGES=1` (chaque page Google est un lancement de
+  navigateur, pas un fetch HTTP léger).
+- **`lib/browser-fetch.ts` limite les lancements de navigateur concurrents**
+  (`MAX_CONCURRENT_BROWSERS=2`) — sans cette limite, une requête où
+  plusieurs providers ont besoin d'un fallback simultanément peut saturer
+  la boucle d'événements Node au point que les `setTimeout` de
+  l'orchestrateur se déclenchent en retard sur le vrai travail (constaté :
+  24s, 4 providers rapportant "error" au lieu de "not_found"). Toute
+  surcharge de timeout par provider dans `route.ts` doit tenir compte de
+  cette file d'attente, pas seulement du temps de lancement brut d'un seul
+  navigateur.
 
 ## Risque légal (scraping)
 

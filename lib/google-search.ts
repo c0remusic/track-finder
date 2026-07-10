@@ -1,9 +1,16 @@
 import * as cheerio from "cheerio";
 import { isRelevantMatch } from "./relevance";
+import { fetchHtmlViaBrowser } from "./browser-fetch";
 
 const GOOGLE_SEARCH_URL = "https://www.google.com/search";
 const RESULTS_PER_PAGE = 10;
-const MAX_PAGES = 2;
+// Was 2 pages — now that each page is a real browser launch (see
+// fetchResultsPage) instead of a cheap HTTP fetch, a second page would push
+// the worst case (own-search launch + 2 Google launches + product-page
+// launch) too close to the orchestrator's per-provider timeout budget. One
+// page covers the common case; a real result rarely sits past position 10
+// for an exact-phrase site-restricted query.
+const MAX_PAGES = 1;
 
 type Candidate = { url: string; title: string };
 
@@ -56,6 +63,12 @@ function extractCandidates(html: string): Candidate[] {
 // `hl=en` pins the results page to English so extractCandidates never has
 // to branch on Google's UI locale. One fetch = one page; the caller drives
 // pagination via `page` (0-indexed, `start=page*10`).
+//
+// A plain `fetch` gets served Google's "enablejs" bot-challenge page (empty
+// #search, no real results) even with a browser User-Agent — verified live
+// (2026-07-10), same class of bot detection as Cloudflare/Akamai on
+// Beatport/Traxsource/Amazon Music. Goes through the same real-browser
+// bypass (lib/browser-fetch.ts) for the same reason.
 async function fetchResultsPage(
   query: string,
   siteFilter: string,
@@ -67,16 +80,7 @@ async function fetchResultsPage(
   });
   if (page > 0) params.set("start", String(page * RESULTS_PER_PAGE));
 
-  try {
-    const response = await fetch(`${GOOGLE_SEARCH_URL}?${params.toString()}`, {
-      signal: AbortSignal.timeout(3000),
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
-    });
-    if (!response.ok) return null;
-    return await response.text();
-  } catch {
-    return null;
-  }
+  return fetchHtmlViaBrowser(`${GOOGLE_SEARCH_URL}?${params.toString()}`);
 }
 
 /**

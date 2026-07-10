@@ -1,4 +1,5 @@
 import { isRelevantMatch } from "../relevance";
+import { findViaGoogle } from "../google-search";
 import type { Provider, ProviderResult } from "./types";
 
 const BANDCAMP_AUTOCOMPLETE_URL =
@@ -15,6 +16,61 @@ type BandcampResult = {
 type BandcampAutocompleteResponse = {
   auto: { results: BandcampResult[] };
 };
+
+// Bandcamp's own autocomplete is strict about combined "artist + title"
+// queries — verified live (2026-07-10): "ticon" alone finds the album,
+// "monda bone" alone finds the track, but "mona bone ticon" (the natural
+// way a user types artist+title together) returns zero results even though
+// the release genuinely exists. A Google fallback restricted to
+// bandcamp.com catches these — same pattern as Beatport/Traxsource.
+type BandcampTralbum = {
+  artist?: string;
+  current?: { title?: string };
+};
+
+function parseTralbum(html: string): BandcampTralbum | null {
+  const match = html.match(/data-tralbum="([^"]+)"/);
+  if (!match) return null;
+  try {
+    const decoded = match[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&#39;/g, "'");
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
+  let html: string;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(3000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
+    });
+    // A Google-found URL that's now unreachable is "no usable result", not
+    // a Bandcamp-side technical failure — stays not_found, never error.
+    if (!response.ok) return { platform: "Bandcamp", status: "not_found" };
+    html = await response.text();
+  } catch {
+    return { platform: "Bandcamp", status: "not_found" };
+  }
+
+  const tralbum = parseTralbum(html);
+  const title = tralbum?.current?.title;
+  if (!title) return { platform: "Bandcamp", status: "not_found" };
+
+  const artist = tralbum?.artist ?? "";
+  if (!isRelevantMatch(query, `${artist} ${title}`)) {
+    return { platform: "Bandcamp", status: "not_found" };
+  }
+
+  return {
+    platform: "Bandcamp",
+    status: "found",
+    purchaseUrl: url,
+    matchedArtist: artist || undefined,
+    matchedTitle: title,
+  };
+}
 
 export const bandcampProvider: Provider = {
   name: "Bandcamp",
@@ -41,7 +97,11 @@ export const bandcampProvider: Provider = {
       );
 
       if (!track || !track.item_url_path) {
-        return { platform: "Bandcamp", status: "not_found" };
+        const googleUrl = await findViaGoogle(query, "bandcamp.com", (u) =>
+          /\/(track|album)\//.test(u)
+        );
+        if (!googleUrl) return { platform: "Bandcamp", status: "not_found" };
+        return fetchProductPage(googleUrl, query);
       }
 
       return {

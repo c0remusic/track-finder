@@ -83,4 +83,54 @@ describe("fetchHtmlViaBrowser", () => {
     expect(result).toBeNull();
     expect(browser.close).toHaveBeenCalled();
   });
+
+  it("queues launches beyond the concurrency cap and releases the slot when one finishes", async () => {
+    const first = makeBrowser("<html>1</html>");
+    const second = makeBrowser("<html>2</html>");
+    const third = makeBrowser("<html>3</html>");
+
+    // Both left pending so this test controls exactly when each slot frees
+    // up — must resolve both before the end, or the module-level
+    // activeBrowsers/browserSlotWaiters state (shared across this whole
+    // test file) leaks a permanently-held slot into later tests.
+    let resolveFirstGoto: () => void = () => {};
+    let resolveSecondGoto: () => void = () => {};
+    first.page.goto.mockImplementation(
+      () => new Promise<void>((resolve) => (resolveFirstGoto = resolve))
+    );
+    second.page.goto.mockImplementation(
+      () => new Promise<void>((resolve) => (resolveSecondGoto = resolve))
+    );
+
+    launchMock
+      .mockResolvedValueOnce(first.browser)
+      .mockResolvedValueOnce(second.browser)
+      .mockResolvedValueOnce(third.browser);
+
+    const p1 = fetchHtmlViaBrowser("https://example.com/1");
+    const p2 = fetchHtmlViaBrowser("https://example.com/2");
+    const p3 = fetchHtmlViaBrowser("https://example.com/3");
+
+    // Let the two allowed launches (MAX_CONCURRENT_BROWSERS = 2) start; the
+    // third should still be queued, so launch() has only been called twice.
+    // Each call chains several real awaits before reaching page.goto()
+    // (acquireBrowserSlot -> launchBrowser -> newContext -> addInitScript ->
+    // newPage -> goto), so poll rather than guess a fixed microtask-tick
+    // count.
+    await vi.waitFor(() => expect(launchMock).toHaveBeenCalledTimes(2));
+    expect(launchMock).not.toHaveBeenCalledTimes(3);
+
+    // Finishing the first call frees a slot for the queued third call.
+    resolveFirstGoto();
+    await p1;
+    await vi.waitFor(() => expect(launchMock).toHaveBeenCalledTimes(3));
+
+    const result3 = await p3;
+    expect(result3).toBe("<html>3</html>");
+    expect(third.browser.close).toHaveBeenCalled();
+
+    // Free p2's slot too, so no state leaks into the next test.
+    resolveSecondGoto();
+    await p2;
+  });
 });

@@ -5,10 +5,10 @@ import { TtlCache } from "../../../lib/cache";
 import { checkRateLimit } from "../../../lib/rate-limit";
 
 // Vercel's default serverless function duration is 10s (Hobby plan) — below
-// the 15s per-provider timeout budget the Playwright-based providers now get
+// the per-provider timeout budget the Playwright-based providers now get
 // (see PROVIDER_TIMEOUT_OVERRIDES_MS below). Without this, Vercel would kill
 // the function before those providers' timeout race even resolves.
-export const maxDuration = 20;
+export const maxDuration = 40;
 
 type AggregatedResult = {
   purchase: ProviderResult[];
@@ -32,11 +32,27 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 
 // Providers that go through a real Chromium instance (see lib/browser-fetch.ts)
 // need more budget than a plain `fetch` — browser launch + navigation alone
-// can take several seconds before any parsing even starts.
+// can take several seconds before any parsing even starts. Beatport/
+// Traxsource/Bandcamp can now chain up to 3 sequential browser launches in
+// their worst case (own search + Google fallback search + Google-found
+// product page — lib/google-search.ts also goes through a real browser as
+// of 2026-07-10, Google serves the same kind of bot-challenge to a plain
+// `fetch` that Cloudflare does). browser-fetch.ts also caps concurrent
+// launches at 2, so when several providers need a fallback simultaneously
+// some of their launches queue instead of all firing at once — the larger
+// budget here accounts for that queueing delay, not just the raw
+// launch+navigate time.
 const PROVIDER_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
-  "Amazon Music": 15000,
-  Beatport: 15000,
-  Traxsource: 15000,
+  // amazon-music.ts's own internal budget is gotoTimeoutMs (20000) +
+  // postGotoWaitMs (2500) = 22500ms minimum before it can return anything —
+  // this override must clear that plus launch/queueing headroom, or the
+  // orchestrator's timer fires first and reports "error" on exactly the
+  // slow-but-working case this budget exists to accommodate (found live
+  // 2026-07-10 via code review: the two numbers had drifted out of sync).
+  "Amazon Music": 28000,
+  Beatport: 30000,
+  Traxsource: 30000,
+  Bandcamp: 30000,
 };
 
 async function runProvider(

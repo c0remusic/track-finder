@@ -44,16 +44,14 @@ describe("beatportProvider", () => {
     });
   });
 
-  it("returns not_found when __NEXT_DATA__ has zero tracks", async () => {
+  it("returns not_found when __NEXT_DATA__ has zero tracks and Google finds nothing", async () => {
     const emptyHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
-    mockBrowserFetch.mockResolvedValue(emptyHtml);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        text: async () => `<html><body><div id="search"></div></body></html>`,
-      })
-    );
+    mockBrowserFetch.mockImplementation((url: string) => {
+      if (url.startsWith("https://www.beatport.com/search")) {
+        return Promise.resolve(emptyHtml);
+      }
+      return Promise.resolve(`<html><body><div id="search"></div></body></html>`);
+    });
 
     const result = await beatportProvider.search("asdkjaskdjaskdj");
 
@@ -81,15 +79,14 @@ describe("beatportProvider", () => {
       if (url.startsWith("https://www.beatport.com/search")) {
         return Promise.resolve(emptySearchHtml);
       }
+      if (url.startsWith("https://www.google.com/search")) {
+        return Promise.resolve(googleResultsHtml);
+      }
       if (url === "https://www.beatport.com/track/minus/11595385") {
         return Promise.resolve(productHtml);
       }
       throw new Error(`unexpected browser fetch: ${url}`);
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
-    );
 
     const result = await beatportProvider.search("Robert Hood Minus");
 
@@ -114,11 +111,12 @@ describe("beatportProvider", () => {
     const emptySearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
     const emptyGoogleHtml = `<!DOCTYPE html><html><body><div id="search"></div></body></html>`;
 
-    mockBrowserFetch.mockResolvedValue(emptySearchHtml);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => emptyGoogleHtml })
-    );
+    mockBrowserFetch.mockImplementation((url: string) => {
+      if (url.startsWith("https://www.beatport.com/search")) {
+        return Promise.resolve(emptySearchHtml);
+      }
+      return Promise.resolve(emptyGoogleHtml);
+    });
 
     const result = await beatportProvider.search("asdkjaskdjaskdj");
 
@@ -133,12 +131,11 @@ describe("beatportProvider", () => {
       if (url.startsWith("https://www.beatport.com/search")) {
         return Promise.resolve(emptySearchHtml);
       }
+      if (url.startsWith("https://www.google.com/search")) {
+        return Promise.resolve(googleResultsHtml);
+      }
       return Promise.resolve(null);
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => googleResultsHtml })
-    );
 
     const result = await beatportProvider.search("Robert Hood Minus");
 
