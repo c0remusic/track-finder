@@ -95,6 +95,30 @@ async function launchBrowser(): Promise<Browser> {
   });
 }
 
+async function fetchOnce(
+  url: string,
+  gotoTimeoutMs: number,
+  postGotoWaitMs: number
+): Promise<string> {
+  const browser = await getSharedBrowser();
+  const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
+  try {
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: gotoTimeoutMs });
+    if (postGotoWaitMs > 0) await page.waitForTimeout(postGotoWaitMs);
+    return await page.content();
+  } finally {
+    // The browser that owns this context may itself be the thing that just
+    // crashed (see the retry below) — closing an already-dead context would
+    // otherwise throw here and mask the real error from fetchOnce's own
+    // try block.
+    await context.close().catch(() => {});
+  }
+}
+
 // Fetches a URL's rendered HTML through a real Chromium instance instead of
 // `fetch`, to survive bot detection that a plain HTTP request can't get
 // past. Never throws — any failure (browser launch, navigation, timeout)
@@ -108,33 +132,28 @@ export async function fetchHtmlViaBrowser(
 
   await acquirePageSlot();
   try {
-    const browser = await getSharedBrowser();
-    const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
     try {
-      await context.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-      });
-      const page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: gotoTimeoutMs });
-      if (postGotoWaitMs > 0) await page.waitForTimeout(postGotoWaitMs);
-      return await page.content();
-    } finally {
-      await context.close();
+      return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
+    } catch {
+      // The single shared Chromium process can crash mid-request under
+      // concurrent load (confirmed live 2026-07-10: "Target page, context
+      // or browser has been closed" mid-navigation, Beatport/Traxsource/
+      // Amazon Music all racing the same shared browser for pages at once)
+      // — every provider mid-flight against that browser fails together
+      // unless the dead reference is dropped and a fresh one launched.
+      // Retry exactly once, and only when the browser is confirmed dead;
+      // an ordinary navigation failure (real bot-block, real timeout) with
+      // the browser still alive isn't worth doubling the latency for.
+      if (sharedBrowser && !sharedBrowser.isConnected()) {
+        sharedBrowser = null;
+        try {
+          return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
+        } catch {
+          return null;
+        }
+      }
+      return null;
     }
-  } catch (err) {
-    // TEMP DIAGNOSTIC (2026-07-10): all 3 Playwright-driven providers were
-    // reported failing in ~6s (too fast to be a Cloudflare navigation
-    // timeout) — logging the real error instead of swallowing it, to find
-    // out whether this is a launch failure vs a navigation failure. Remove
-    // once root cause is confirmed.
-    console.error("[browser-fetch] fetchHtmlViaBrowser failed", url, err);
-    // The shared browser process itself may have crashed/disconnected —
-    // drop the reference so the next call relaunches instead of repeatedly
-    // failing against a dead browser.
-    if (sharedBrowser && !sharedBrowser.isConnected()) {
-      sharedBrowser = null;
-    }
-    return null;
   } finally {
     releasePageSlot();
   }

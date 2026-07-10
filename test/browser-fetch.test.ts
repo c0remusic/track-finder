@@ -145,6 +145,56 @@ describe("fetchHtmlViaBrowser", () => {
     expect(launchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retries once with a fresh browser when the shared browser crashes mid-call, and still returns the result", async () => {
+    // Regression (confirmed live 2026-07-10): the single shared Chromium
+    // process crashed mid-navigation under concurrent load ("Target page,
+    // context or browser has been closed"), taking every provider racing
+    // that same browser down with it. A crash detected mid-call must
+    // relaunch and retry once, not just leave the next unrelated call to
+    // pick up the pieces.
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const first = makeBrowser();
+    const crashingPage = makePage("<html>unused</html>");
+    crashingPage.goto.mockImplementation(() => {
+      first.browser.isConnected.mockReturnValue(false);
+      return Promise.reject(new Error("page.goto: Target page, context or browser has been closed"));
+    });
+    first.context.newPage.mockResolvedValue(crashingPage);
+
+    const second = makeBrowser();
+    second.context.newPage.mockResolvedValue(makePage("<html>recovered</html>"));
+
+    launchMock.mockResolvedValueOnce(first.browser).mockResolvedValueOnce(second.browser);
+
+    const result = await fetchHtmlViaBrowser("https://example.com");
+
+    expect(result).toBe("<html>recovered</html>");
+    expect(launchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the retry also fails against the freshly relaunched browser", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const first = makeBrowser();
+    const crashingPage = makePage("<html>unused</html>");
+    crashingPage.goto.mockImplementation(() => {
+      first.browser.isConnected.mockReturnValue(false);
+      return Promise.reject(new Error("crashed"));
+    });
+    first.context.newPage.mockResolvedValue(crashingPage);
+
+    const second = makeBrowser();
+    const stillFailingPage = makePage("<html>unused2</html>");
+    stillFailingPage.goto.mockRejectedValue(new Error("timeout"));
+    second.context.newPage.mockResolvedValue(stillFailingPage);
+
+    launchMock.mockResolvedValueOnce(first.browser).mockResolvedValueOnce(second.browser);
+
+    const result = await fetchHtmlViaBrowser("https://example.com");
+
+    expect(result).toBeNull();
+    expect(launchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("queues page opens beyond the concurrency cap and releases the slot when one finishes", async () => {
     const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
     const { browser, context } = makeBrowser();
