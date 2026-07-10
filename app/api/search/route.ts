@@ -40,11 +40,16 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 // to a plain `fetch` that Cloudflare does), each with a default
 // `gotoTimeoutMs` of 10s — 30s of goto budget alone before counting launch
 // overhead or queueing. All Playwright-driven providers now draw from a
-// single shared pool of `MAX_CONCURRENT_PAGES = 3` page slots in
-// browser-fetch.ts (not a per-provider limit), so up to 4 providers'
-// simultaneous first calls can mean one queues behind Amazon Music's own
-// ~22.5s internal budget before its own chain even starts. The budgets
-// below leave headroom for that queueing on top of the raw sequential-goto
+// single shared pool of `MAX_CONCURRENT_PAGES = 2` page slots in
+// browser-fetch.ts (not a per-provider limit — lowered from 3 on
+// 2026-07-10 after the shared `--single-process` Chromium was confirmed
+// crashing under 3-way concurrent page load in production), so up to 4
+// providers' simultaneous first calls can mean two queue behind the other
+// two's page opens before their own chain even starts. browser-fetch.ts
+// also now retries once against a freshly relaunched browser if the shared
+// one crashes mid-call, which can itself add up to one more full
+// launch+goto cycle on top of the worst case below. The budgets below
+// leave headroom for that queueing/retry on top of the raw sequential-goto
 // worst case, not just the launch+navigate time (found live 2026-07-10 via
 // code review: the previous numbers had zero margin left once the shared
 // page-slot pool was introduced).

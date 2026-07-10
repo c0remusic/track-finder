@@ -52,7 +52,17 @@ async function getSharedBrowser(): Promise<Browser> {
 // renderer per page, so an unbounded burst (e.g. every provider's fallback
 // triggering at once) could still contend for CPU. The cap is looser than
 // the old per-browser-process limit since the unit is cheaper now.
-const MAX_CONCURRENT_PAGES = 3;
+//
+// Lowered from 3 to 2 (2026-07-10): confirmed live in production that 3
+// concurrent pages against the shared `--single-process` Chromium (the
+// @sparticuz/chromium default, chosen for its own lower memory footprint)
+// crashed the browser mid-navigation under real concurrent load — visible
+// as "Target page, context or browser has been closed" errors that took
+// every provider racing that same browser down together, sometimes
+// surviving the one-retry recovery in fetchHtmlViaBrowser but crashing
+// again on the retry too. This trades a bit of speed under heavy
+// concurrency for not exceeding the serverless function's memory budget.
+const MAX_CONCURRENT_PAGES = 2;
 let activePages = 0;
 const pageSlotWaiters: (() => void)[] = [];
 
