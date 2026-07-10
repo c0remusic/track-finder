@@ -121,7 +121,13 @@ export async function fetchHtmlViaBrowser(
     } finally {
       await context.close();
     }
-  } catch {
+  } catch (err) {
+    // TEMP DIAGNOSTIC (2026-07-10): all 3 Playwright-driven providers were
+    // reported failing in ~6s (too fast to be a Cloudflare navigation
+    // timeout) — logging the real error instead of swallowing it, to find
+    // out whether this is a launch failure vs a navigation failure. Remove
+    // once root cause is confirmed.
+    console.error("[browser-fetch] fetchHtmlViaBrowser failed", url, err);
     // The shared browser process itself may have crashed/disconnected —
     // drop the reference so the next call relaunches instead of repeatedly
     // failing against a dead browser.
