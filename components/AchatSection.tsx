@@ -1,8 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ProviderResult } from "@/lib/providers/types";
-
-export type Slot = ProviderResult | { platform: string; status: "pending" };
+import type { Slot } from "@/lib/providers/types";
 
 export function AchatSection({ results }: { results: Slot[] }) {
   const visible = results.filter((r) => r.status !== "not_found");

@@ -21,3 +21,7 @@ export type Provider = {
   name: string;
   search(query: string): Promise<ProviderResult>;
 };
+
+// UI-only state shape: a platform's row before its result has arrived over
+// the search stream.
+export type Slot = ProviderResult | { platform: string; status: "pending" };

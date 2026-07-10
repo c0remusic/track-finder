@@ -128,22 +128,46 @@ export async function GET(request: NextRequest) {
   // moment it settles (or, on a cache hit, replayed immediately) instead of
   // the client waiting for the slowest of the 5 — Amazon Music's Playwright
   // cold start in particular — before seeing anything.
+  let cancelled = false;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
+      // Once the client disconnects (cancel() below), the controller is
+      // already closed — enqueue() would throw. Swallow that specific case;
+      // any other failure still surfaces via controller.error() below.
       const send = (event: string, data: unknown) => {
-        controller.enqueue(encoder.encode(sseEvent(event, data)));
+        if (cancelled) return;
+        try {
+          controller.enqueue(encoder.encode(sseEvent(event, data)));
+        } catch {
+          // Controller closed between the cancelled check and this call —
+          // ignore, nothing left to stream to.
+        }
       };
 
-      const { metadata } = await aggregateSearch(
-        query,
-        allProviders,
-        DEFAULT_PROVIDER_TIMEOUT_MS,
-        (result) => send("provider", result)
-      );
+      try {
+        const { metadata } = await aggregateSearch(
+          query,
+          allProviders,
+          DEFAULT_PROVIDER_TIMEOUT_MS,
+          (result) => send("provider", result)
+        );
 
-      send("done", { metadata });
-      controller.close();
+        if (!cancelled) {
+          send("done", { metadata });
+          controller.close();
+        }
+      } catch (err) {
+        if (!cancelled) controller.error(err);
+      }
+    },
+    cancel() {
+      // Fires if the client navigates away / aborts mid-search. Nothing to
+      // actively tear down (aggregateSearch's own per-provider timeouts
+      // still bound how long the in-flight work runs) — this just stops
+      // `send` from touching an already-closed controller.
+      cancelled = true;
     },
   });
 
