@@ -144,7 +144,12 @@ export async function fetchHtmlViaBrowser(
   try {
     try {
       return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
-    } catch {
+    } catch (err) {
+      // TEMP DIAGNOSTIC (2026-07-10, round 2): lowering MAX_CONCURRENT_PAGES
+      // to 2 did not resolve the failures — still erroring in ~5-6s, too
+      // fast even for 2-page contention. Logging again to see whether this
+      // is still the same crash signature or something else entirely.
+      console.error("[browser-fetch] fetchOnce failed (attempt 1)", url, err);
       // The single shared Chromium process can crash mid-request under
       // concurrent load (confirmed live 2026-07-10: "Target page, context
       // or browser has been closed" mid-navigation, Beatport/Traxsource/
@@ -158,9 +163,12 @@ export async function fetchHtmlViaBrowser(
         sharedBrowser = null;
         try {
           return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
-        } catch {
+        } catch (retryErr) {
+          console.error("[browser-fetch] fetchOnce failed (attempt 2, after relaunch)", url, retryErr);
           return null;
         }
+      } else {
+        console.error("[browser-fetch] not retrying — browser still reports connected", url);
       }
       return null;
     }
