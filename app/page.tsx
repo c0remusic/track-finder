@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { SearchForm } from "@/components/SearchForm";
 import { AchatSection } from "@/components/AchatSection";
 import { Disclaimer } from "@/components/Disclaimer";
+import { Logo } from "@/components/Logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { PROVIDER_NAMES } from "@/lib/providers/names";
 import type { ProviderResult, Slot } from "@/lib/providers/types";
 
@@ -61,13 +63,25 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-6 text-2xl font-semibold">Track finder</h1>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Logo className="size-6" />
+          <h1 className="text-2xl font-semibold">Track finder</h1>
+        </div>
+        <ThemeToggle />
+      </div>
+      {!slots && (
+        <p className="mb-6 text-sm text-muted-foreground">
+          Trouve où acheter une release en fichier, sur les plateformes qui vendent vraiment à
+          l&apos;unité.
+        </p>
+      )}
       <SearchForm onSearch={handleSearch} isLoading={isLoading} />
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
       {slots && (
-        <div className="mt-8 grid gap-8">
+        <div className="mt-8 grid gap-8" aria-live="polite">
           <section>
             <h2 className="mb-3 text-lg font-medium">Où acheter</h2>
             <AchatSection results={orderedSlots} />

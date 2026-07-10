@@ -17,6 +17,12 @@
       "date": "2026-07-10",
       "topic": "Beatport/Traxsource sur Playwright + fix timeout Amazon Music",
       "summary": "Beatport/Traxsource passent du fetch brut (bloqué par Cloudflare, fingerprint TLS + détection headless) à un vrai Chromium via lib/browser-fetch.ts, module partagé avec Amazon Music. Bug racine découvert en cours d'implémentation : @sparticuz/chromium ne se lance pas du tout en local Windows (ENOENT) — branché désormais sur process.env.VERCEL (Chromium Lambda en prod, Edge système en local). Timeout orchestrateur par provider (15s) + maxDuration=20 sur la route (sinon tué par le cap 10s Hobby de Vercel). Vérifié en direct sur 5 requêtes réelles : 4-5/5 providers trouvent un résultat, plus aucune erreur de crash."
+    },
+    {
+      "path": "docs/superpowers/changes/2026-07-10-ui-refresh-dark-mode-branding/design.md",
+      "date": "2026-07-10",
+      "topic": "rafraîchissement UI/UX, dark mode, identité de marque",
+      "summary": "Session nocturne autonome (demande explicite, choix laissés à Claude) : dark mode (next-themes, pattern officiel shadcn vérifié), accent violet/indigo sobre + monogramme SVG (logo + favicon via next/og), animations d'entrée (motion) sur les résultats de recherche, skeleton de chargement par ligne, état vide avec sous-titre, région aria-live, metadata de page réels (remplace le défaut \"Create Next App\"), nettoyage des SVG de démo Next.js. Bug trouvé et corrigé en cours d'implémentation : AnimatePresence mode=\"wait\" restait bloqué en état pending sous rafale SSE rapide (cache hit, 5 events quasi simultanés) — remplacé par une animation d'entrée simple sans coordination d'exit. Audité par un agent de revue dédié (aucun finding bloquant) avant commit."
     }
   ],
   "plans": [

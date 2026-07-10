@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -27,6 +28,7 @@ export function SearchForm({ onSearch, isLoading }: Props) {
         aria-label="Recherche artiste et titre"
       />
       <Button type="submit" disabled={isLoading}>
+        {isLoading && <Loader2 className="animate-spin" />}
         {isLoading ? "Recherche..." : "Chercher"}
       </Button>
     </form>

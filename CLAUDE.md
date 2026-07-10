@@ -24,7 +24,8 @@ notre app est sur `track-finder-c0re-s-projects.vercel.app`.
 ## Stack
 
 Next.js 16 (App Router, Turbopack) · React 19 · Tailwind v4 + shadcn/ui
-(style base-nova, `@base-ui/react`) · cheerio (parsing HTML) ·
+(style base-nova, `@base-ui/react`) · next-themes (dark mode) · motion
+(animations, import path `motion/react`) · cheerio (parsing HTML) ·
 playwright-core + @sparticuz/chromium (Amazon Music, serverless) ·
 @upstash/ratelimit + @upstash/redis (rate limiting, fail-open) · Vitest.
 Déployé sur Vercel, repo GitHub public (`c0remusic/track-finder`, git-linked
@@ -45,12 +46,18 @@ Déployé sur Vercel, repo GitHub public (`c0remusic/track-finder`, git-linked
 ```
 app/
   page.tsx              — page de recherche (client component, EventSource)
+  layout.tsx             — ThemeProvider (next-themes) + metadata réels
+  icon.tsx                — favicon généré (next/og ImageResponse), même
+                           motif que components/Logo.tsx
   api/search/route.ts   — orchestrateur SSE : fan-out 5 providers, cache,
                            rate limit, timeout dur par provider
-  globals.css           — thème shadcn (variables oklch, voir Task 1 du plan
-                           pour l'historique du bug "variables manquantes")
+  globals.css           — thème shadcn (variables oklch, accent violet
+                           `--primary`/`--ring` depuis le 2026-07-10 — voir
+                           Task 1 du plan pour l'historique du bug
+                           "variables manquantes")
 components/
-  SearchForm.tsx, AchatSection.tsx, MetadataSection.tsx, Disclaimer.tsx
+  SearchForm.tsx, AchatSection.tsx, Disclaimer.tsx, Logo.tsx
+  theme-provider.tsx, theme-toggle.tsx — dark mode (next-themes)
   ui/                   — composants shadcn (badge/button/card/input)
 lib/
   providers/
