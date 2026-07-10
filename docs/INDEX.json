@@ -1,0 +1,18 @@
+{
+  "specs": [
+    {
+      "path": "docs/superpowers/changes/2026-07-09-track-finder/design.md",
+      "date": "2026-07-09",
+      "topic": "design MVP track-finder",
+      "summary": "Agrégateur de liens d'achat (Beatport/Traxsource/Amazon Music/Bandcamp/Apple Music) + metadata agrégée. Architecture Next.js/orchestrateur/cache/rate-limit, décisions actées pendant le brainstorm, risques légaux/scraping documentés. Mis à jour le 2026-07-10 : révision de la règle d'affichage not_found (voir plan)."
+    }
+  ],
+  "plans": [
+    {
+      "path": "docs/superpowers/plans/2026-07-09-track-finder-mvp.md",
+      "date": "2026-07-09",
+      "topic": "plan d'implémentation MVP (12 tâches)",
+      "summary": "12 tâches livrées via subagent-driven-development : scaffold, 5 providers (vérifiés en direct — API officielle Apple Music/Bandcamp, scraping Beatport/Traxsource, Playwright serverless Amazon Music), orchestrateur SSE, rate limiting fail-open, UI, déploiement Vercel. Task 6 (Bandcamp) révisée en cours de route après blocage CAPTCHA réel — voir la section Task 6 pour l'historique. Post-livraison (2026-07-10) : fix orchestrateur (timeout dur par provider), fix Playwright serverless (playwright-core + @sparticuz/chromium + outputFileTracingIncludes), fix pertinence de match (faux positifs), passage à un streaming SSE incrémental, révision de la règle d'affichage not_found (toujours visible, badge neutre)."
+    }
+  ]
+}
