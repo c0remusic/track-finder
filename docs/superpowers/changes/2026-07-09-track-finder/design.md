@@ -44,12 +44,16 @@ outil est différé à une décision ultérieure (demande explicite d'Antoine :
   Discogs/MusicBrainz — déjà couvert côté Sift séparément). MusicBrainz jugé
   moins pertinent que Discogs pour l'électronique (couverture plus faible,
   Discogs historiquement plus spécialisé sur ce créneau).
-- Règle d'affichage : une plateforme où le titre **n'existe vraiment pas**
-  (`not_found`) est invisible dans "Où acheter" (pas de bruit) ; une
-  plateforme où la recherche **a échoué** (`error` — blocage anti-bot,
-  timeout) reste affichée explicitement ("indisponible pour l'instant") —
-  distinction volontaire, cohérente avec la règle Sift "jamais de fallback
-  silencieux".
+- Règle d'affichage (**révisée le 2026-07-10** après usage réel — la version
+  initiale masquait `not_found`, jugée confusante en pratique : une ligne
+  passait de "Recherche…" à disparaître d'un coup, lisant comme un bug
+  plutôt qu'un choix voulu) : les 5 plateformes restent **toujours
+  visibles**, avec 3 états finaux distincts — lien d'achat (`found`),
+  badge neutre "Non trouvé" (`not_found` — recherche réellement exécutée,
+  rien de pertinent) et badge destructif "Indisponible pour l'instant"
+  (`error` — échec technique réel : blocage anti-bot, timeout). Distinction
+  `not_found`/`error` toujours maintenue (cohérente avec la règle Sift
+  "jamais de fallback silencieux"), seule leur visibilité a changé.
 - Nom du projet : placeholder générique pour l'instant, à trancher plus tard.
 - Apple Music : API iTunes Search publique/gratuite (pas MusicKit) — corrigé
   après revue, voir section Architecture.
