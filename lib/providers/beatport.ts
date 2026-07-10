@@ -1,3 +1,4 @@
+import { findViaGoogle } from "../google-search";
 import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
@@ -40,6 +41,81 @@ function firstTrack(nextData: unknown): BeatportTrack | null {
   return tracks[0];
 }
 
+type BeatportProductTrack = {
+  id: number;
+  name: string;
+  mix_name?: string;
+  artists?: { name: string }[];
+  bpm?: number;
+  key?: { name: string };
+  genre?: { name: string };
+  release?: { label?: { name: string } };
+  image?: { uri?: string };
+};
+
+// A product page's __NEXT_DATA__ holds the track directly at
+// queries[0].state.data — a different shape from the search-results page
+// (queries[0].state.data.tracks.data[]), verified live (2026-07-10).
+function productPageTrack(nextData: unknown): BeatportProductTrack | null {
+  const data = nextData as {
+    props?: {
+      pageProps?: {
+        dehydratedState?: {
+          queries?: { state?: { data?: BeatportProductTrack } }[];
+        };
+      };
+    };
+  };
+  return data?.props?.pageProps?.dehydratedState?.queries?.[0]?.state?.data ?? null;
+}
+
+async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
+  let html: string;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(3000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
+    });
+    // A Google-found URL that's now unreachable is "no usable result", not
+    // a Beatport-side technical failure — stays not_found, never error.
+    if (!response.ok) return { platform: "Beatport", status: "not_found" };
+    html = await response.text();
+  } catch {
+    return { platform: "Beatport", status: "not_found" };
+  }
+
+  const nextData = extractNextData(html);
+  if (!nextData) return { platform: "Beatport", status: "not_found" };
+
+  const track = productPageTrack(nextData);
+  if (!track) return { platform: "Beatport", status: "not_found" };
+
+  const title =
+    track.mix_name && track.mix_name !== "Original Mix"
+      ? `${track.name} (${track.mix_name})`
+      : track.name;
+  const artist = track.artists?.[0]?.name ?? "";
+
+  if (!isRelevantMatch(query, `${artist} ${title}`)) {
+    return { platform: "Beatport", status: "not_found" };
+  }
+
+  return {
+    platform: "Beatport",
+    status: "found",
+    purchaseUrl: url,
+    coverUrl: track.image?.uri,
+    matchedArtist: artist || undefined,
+    matchedTitle: title,
+    metadata: {
+      bpm: track.bpm,
+      key: track.key?.name,
+      genre: track.genre?.name,
+      label: track.release?.label?.name,
+    },
+  };
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -69,7 +145,15 @@ export const beatportProvider: Provider = {
     if (!nextData) return { platform: "Beatport", status: "error" };
 
     const track = firstTrack(nextData);
-    if (!track) return { platform: "Beatport", status: "not_found" };
+    if (!track) {
+      const googleUrl = await findViaGoogle(
+        query,
+        "beatport.com/track",
+        (u) => /\/track\//.test(u)
+      );
+      if (!googleUrl) return { platform: "Beatport", status: "not_found" };
+      return fetchProductPage(googleUrl, query);
+    }
 
     const title =
       track.mix_name && track.mix_name !== "Original Mix"
