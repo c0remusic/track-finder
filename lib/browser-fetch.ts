@@ -112,8 +112,20 @@ async function launchBrowser(): Promise<Browser> {
   // Vercel, launch the system's installed Edge/Chrome via playwright-core's
   // `channel` option instead — no extra binary to download or bundle.
   if (process.env.VERCEL) {
+    // @sparticuz/chromium's default args include --single-process, chosen
+    // to minimize Lambda memory footprint — but it runs the browser and
+    // every renderer in one OS process/thread pool, which is inherently
+    // more crash-prone than Chromium's normal multi-process architecture.
+    // Confirmed live 2026-07-10: even with page concurrency fully
+    // serialized to 1, the shared browser still crashed with "Target page,
+    // context or browser has been closed" at newPage/goto/waitForTimeout.
+    // Vercel Hobby's fixed 2GB function memory (not the tight ceiling
+    // originally assumed) should have headroom for normal multi-process
+    // Chromium, so removing this flag trades some of that memory margin
+    // for the stability multi-process mode is actually built for.
+    const args = sparticuzChromium.args.filter((arg) => arg !== "--single-process");
     return playwrightCore.launch({
-      args: [...sparticuzChromium.args, ...ANTI_DETECTION_ARGS],
+      args: [...args, ...ANTI_DETECTION_ARGS],
       executablePath: await sparticuzChromium.executablePath(),
       headless: true,
     });
