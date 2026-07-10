@@ -16,6 +16,11 @@ type AggregatedMetadata = {
 type AggregatedResult = {
   purchase: ProviderResult[];
   metadata: AggregatedMetadata;
+  // Every provider's raw result, including `not_found` ones — kept so a
+  // cache hit can replay the exact same per-provider events a live run
+  // would have emitted (see `onProviderResult` below), not just the
+  // already-filtered purchase list.
+  all: ProviderResult[];
 };
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -57,21 +62,7 @@ async function runProvider(
   }
 }
 
-export async function aggregateSearch(
-  query: string,
-  providers: Provider[] = allProviders,
-  providerTimeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
-): Promise<AggregatedResult> {
-  const cacheKey = query.trim().toLowerCase();
-  const cached = searchCache.get(cacheKey);
-  if (cached) return cached;
-
-  const results = await Promise.all(
-    providers.map((p) => runProvider(p, query, providerTimeoutMs))
-  );
-
-  const purchase = results.filter((r) => r.status !== "not_found");
-
+function buildMetadata(results: ProviderResult[]): AggregatedMetadata {
   const metadata: AggregatedMetadata = { bpm: [], key: [], genre: [], label: [] };
   for (const result of results) {
     if (result.status !== "found" || !result.metadata) continue;
@@ -81,10 +72,44 @@ export async function aggregateSearch(
     if (genre !== undefined) metadata.genre.push({ value: genre, source: result.platform });
     if (label !== undefined) metadata.label.push({ value: label, source: result.platform });
   }
+  return metadata;
+}
 
-  const aggregated: AggregatedResult = { purchase, metadata };
+export async function aggregateSearch(
+  query: string,
+  providers: Provider[] = allProviders,
+  providerTimeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS,
+  // Invoked once per provider result, in resolution order — on a fresh run
+  // as each provider settles, or (replayed) once per stored result on a
+  // cache hit. Used by GET to stream results incrementally; unused by the
+  // existing non-streaming callers/tests.
+  onProviderResult?: (result: ProviderResult) => void
+): Promise<AggregatedResult> {
+  const cacheKey = query.trim().toLowerCase();
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    if (onProviderResult) cached.all.forEach(onProviderResult);
+    return cached;
+  }
+
+  const results = await Promise.all(
+    providers.map(async (p) => {
+      const result = await runProvider(p, query, providerTimeoutMs);
+      onProviderResult?.(result);
+      return result;
+    })
+  );
+
+  const purchase = results.filter((r) => r.status !== "not_found");
+  const metadata = buildMetadata(results);
+
+  const aggregated: AggregatedResult = { purchase, metadata, all: results };
   searchCache.set(cacheKey, aggregated);
   return aggregated;
+}
+
+function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 export async function GET(request: NextRequest) {
@@ -99,6 +124,34 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing q parameter" }, { status: 400 });
   }
 
-  const result = await aggregateSearch(query);
-  return NextResponse.json(result);
+  // Server-Sent Events: each provider's result is pushed to the client the
+  // moment it settles (or, on a cache hit, replayed immediately) instead of
+  // the client waiting for the slowest of the 5 — Amazon Music's Playwright
+  // cold start in particular — before seeing anything.
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(encoder.encode(sseEvent(event, data)));
+      };
+
+      const { metadata } = await aggregateSearch(
+        query,
+        allProviders,
+        DEFAULT_PROVIDER_TIMEOUT_MS,
+        (result) => send("provider", result)
+      );
+
+      send("done", { metadata });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }

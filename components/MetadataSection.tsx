@@ -1,12 +1,16 @@
 type MetadataValue<T> = { value: T; source: string };
 
+type Metadata = {
+  bpm: MetadataValue<number>[];
+  key: MetadataValue<string>[];
+  genre: MetadataValue<string>[];
+  label: MetadataValue<string>[];
+};
+
 type Props = {
-  metadata: {
-    bpm: MetadataValue<number>[];
-    key: MetadataValue<string>[];
-    genre: MetadataValue<string>[];
-    label: MetadataValue<string>[];
-  };
+  // null = still waiting on the "done" event (some providers may still be
+  // in flight), as distinct from a resolved-but-empty metadata object.
+  metadata: Metadata | null;
 };
 
 function Field<T>({ label, values }: { label: string; values: MetadataValue<T>[] }) {
@@ -22,6 +26,10 @@ function Field<T>({ label, values }: { label: string; values: MetadataValue<T>[]
 }
 
 export function MetadataSection({ metadata }: Props) {
+  if (metadata === null) {
+    return <p className="text-sm text-muted-foreground">Recherche en cours…</p>;
+  }
+
   const hasAny =
     metadata.bpm.length + metadata.key.length + metadata.genre.length + metadata.label.length > 0;
 

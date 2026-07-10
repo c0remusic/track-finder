@@ -2,14 +2,18 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { ProviderResult } from "@/lib/providers/types";
 
-export function AchatSection({ results }: { results: ProviderResult[] }) {
-  if (results.length === 0) {
+export type Slot = ProviderResult | { platform: string; status: "pending" };
+
+export function AchatSection({ results }: { results: Slot[] }) {
+  const visible = results.filter((r) => r.status !== "not_found");
+
+  if (visible.length === 0) {
     return <p className="text-sm text-muted-foreground">Aucune plateforme trouvée.</p>;
   }
 
   return (
     <div className="grid gap-3">
-      {results.map((r) => (
+      {visible.map((r) => (
         <Card key={r.platform} className="flex items-center justify-between p-4">
           <div>
             <p className="font-medium">{r.platform}</p>
@@ -19,7 +23,9 @@ export function AchatSection({ results }: { results: ProviderResult[] }) {
               </p>
             )}
           </div>
-          {r.status === "found" && r.purchaseUrl ? (
+          {r.status === "pending" ? (
+            <span className="text-sm text-muted-foreground">Recherche…</span>
+          ) : r.status === "found" && r.purchaseUrl ? (
             <a
               href={r.purchaseUrl}
               target="_blank"

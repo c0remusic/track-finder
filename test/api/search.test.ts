@@ -96,4 +96,40 @@ describe("aggregateSearch", () => {
     expect(result.purchase.map((r) => r.platform).sort()).toEqual(["B", "Hangs Forever"]);
     expect(result.purchase.find((r) => r.platform === "Hangs Forever")?.status).toBe("error");
   });
+
+  it("invokes onProviderResult once per provider, including not_found ones, on a fresh run", async () => {
+    const providers: Provider[] = [
+      fakeProvider({
+        name: "A",
+        search: async () => ({ platform: "A", status: "found", purchaseUrl: "https://a.example/x" }),
+      }),
+      fakeProvider({ name: "B", search: async () => ({ platform: "B", status: "not_found" }) }),
+    ];
+
+    const seen: string[] = [];
+    await aggregateSearch("query-callback-fresh", providers, undefined, (result) => {
+      seen.push(`${result.platform}:${result.status}`);
+    });
+
+    expect(seen.sort()).toEqual(["A:found", "B:not_found"]);
+  });
+
+  it("replays every stored result via onProviderResult on a cache hit", async () => {
+    const providers: Provider[] = [
+      fakeProvider({
+        name: "A",
+        search: async () => ({ platform: "A", status: "found", purchaseUrl: "https://a.example/x" }),
+      }),
+      fakeProvider({ name: "B", search: async () => ({ platform: "B", status: "not_found" }) }),
+    ];
+
+    await aggregateSearch("query-callback-cache-hit", providers);
+
+    const seen: string[] = [];
+    await aggregateSearch("query-callback-cache-hit", providers, undefined, (result) => {
+      seen.push(`${result.platform}:${result.status}`);
+    });
+
+    expect(seen.sort()).toEqual(["A:found", "B:not_found"]);
+  });
 });

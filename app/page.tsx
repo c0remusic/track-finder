@@ -2,43 +2,57 @@
 
 import { useState } from "react";
 import { SearchForm } from "@/components/SearchForm";
-import { AchatSection } from "@/components/AchatSection";
+import { AchatSection, type Slot } from "@/components/AchatSection";
 import { MetadataSection } from "@/components/MetadataSection";
 import { Disclaimer } from "@/components/Disclaimer";
+import { PROVIDER_NAMES } from "@/lib/providers/names";
 import type { ProviderResult } from "@/lib/providers/types";
 
-type SearchResponse = {
-  purchase: ProviderResult[];
-  metadata: {
-    bpm: { value: number; source: string }[];
-    key: { value: string; source: string }[];
-    genre: { value: string; source: string }[];
-    label: { value: string; source: string }[];
-  };
+type Metadata = {
+  bpm: { value: number; source: string }[];
+  key: { value: string; source: string }[];
+  genre: { value: string; source: string }[];
+  label: { value: string; source: string }[];
 };
 
 export default function Home() {
-  const [data, setData] = useState<SearchResponse | null>(null);
+  const [slots, setSlots] = useState<Record<string, Slot> | null>(null);
+  const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSearch(query: string) {
+  function handleSearch(query: string) {
     setIsLoading(true);
     setError(null);
-    try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        setError("La recherche a échoué. Réessaie dans un instant.");
-        return;
-      }
-      const json = (await response.json()) as SearchResponse;
-      setData(json);
-    } catch {
-      setError("La recherche a échoué. Réessaie dans un instant.");
-    } finally {
+    setMetadata(null);
+    setSlots(
+      Object.fromEntries(
+        PROVIDER_NAMES.map((name) => [name, { platform: name, status: "pending" as const }])
+      )
+    );
+
+    const source = new EventSource(`/api/search?q=${encodeURIComponent(query)}`);
+
+    source.addEventListener("provider", (event) => {
+      const result = JSON.parse(event.data) as ProviderResult;
+      setSlots((prev) => (prev ? { ...prev, [result.platform]: result } : prev));
+    });
+
+    source.addEventListener("done", (event) => {
+      const { metadata: finalMetadata } = JSON.parse(event.data) as { metadata: Metadata };
+      setMetadata(finalMetadata);
       setIsLoading(false);
-    }
+      source.close();
+    });
+
+    source.onerror = () => {
+      setError("La recherche a échoué. Réessaie dans un instant.");
+      setIsLoading(false);
+      source.close();
+    };
   }
+
+  const orderedSlots = slots ? PROVIDER_NAMES.map((name) => slots[name]) : [];
 
   return (
     <main className="mx-auto max-w-2xl p-6">
@@ -47,15 +61,15 @@ export default function Home() {
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
-      {data && (
+      {slots && (
         <div className="mt-8 grid gap-8">
           <section>
             <h2 className="mb-3 text-lg font-medium">Où acheter</h2>
-            <AchatSection results={data.purchase} />
+            <AchatSection results={orderedSlots} />
           </section>
           <section>
             <h2 className="mb-3 text-lg font-medium">Metadata</h2>
-            <MetadataSection metadata={data.metadata} />
+            <MetadataSection metadata={metadata} />
           </section>
         </div>
       )}
