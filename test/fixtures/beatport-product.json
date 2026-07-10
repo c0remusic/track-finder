@@ -1,0 +1,28 @@
+{
+  "props": {
+    "pageProps": {
+      "dehydratedState": {
+        "queries": [
+          {
+            "state": {
+              "data": {
+                "id": 11595385,
+                "name": "Minus",
+                "mix_name": "Original Mix",
+                "artists": [{ "id": 8868, "name": "Robert Hood" }],
+                "bpm": 135,
+                "key": { "name": "G# Minor" },
+                "genre": { "name": "Techno (Raw / Deep / Hypnotic)" },
+                "release": { "label": { "name": "Tresor Records" } },
+                "slug": "minus",
+                "image": {
+                  "uri": "https://geo-media.beatport.com/image_size/500x500/5210c009e66df5f21140e78c61b2b97c.jpg"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
