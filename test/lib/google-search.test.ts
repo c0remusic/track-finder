@@ -79,4 +79,51 @@ describe("findViaGoogle", () => {
     expect(url).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("accepts a candidate from the correct domain (regression: www subdomain)", async () => {
+    // Existing test with www.beatport.com must still pass — this is the
+    // main regression check that hostMatches allows subdomains.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => relevantHtml })
+    );
+
+    const url = await findViaGoogle("Robert Hood Minus", "beatport.com/track", isTrackUrl);
+
+    expect(url).toBe("https://www.beatport.com/track/minus/11595385");
+  });
+
+  it("rejects a candidate from a different host even if path and title match", async () => {
+    // Construct a synthetic fixture with a result from evil-mirror.example
+    // that has the same path pattern (/track/...) and a matching title.
+    // This candidate should be rejected by hostMatches, even though it
+    // passes isPlausibleUrl (path matches /\/track\//) and isRelevantMatch
+    // (title is about Robert Hood). We fall through to page 2 (empty) and
+    // return null.
+    const evilMirrorHtml = `<!DOCTYPE html>
+<html><body>
+<div id="search">
+<div class="g">
+  <a href="https://evil-mirror.example/track/minus/1">
+    <h3>Robert Hood - Minus (Original Mix) [Tresor Records]</h3>
+  </a>
+</div>
+</div>
+</body></html>`;
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      const isPage2 = url.includes("start=10");
+      return Promise.resolve({
+        ok: true,
+        text: async () => (isPage2 ? emptyHtml : evilMirrorHtml),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const url = await findViaGoogle("Robert Hood Minus", "beatport.com/track", isTrackUrl);
+
+    // Should reject the evil-mirror result and fall through to page 2 (empty)
+    expect(url).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

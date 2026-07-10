@@ -7,6 +7,22 @@ const MAX_PAGES = 2;
 
 type Candidate = { url: string; title: string };
 
+// Extract the domain from siteFilter (e.g., "beatport.com" from
+// "beatport.com/track") and check if the candidate URL's hostname matches
+// it (exact match or subdomain). Prevents domain hijacking where a malicious
+// or unrelated domain could pass `isPlausibleUrl` if that predicate only
+// checks the path.
+function hostMatches(url: string, siteFilter: string): boolean {
+  try {
+    const domain = siteFilter.split("/")[0]; // Extract domain before first /
+    const u = new URL(url);
+    // Accept exact match or subdomain (e.g., www.beatport.com for beatport.com)
+    return u.hostname === domain || u.hostname.endsWith("." + domain);
+  } catch {
+    return false;
+  }
+}
+
 // Google appends tracking params (e.g. `?srsltid=...`) to result links —
 // strip them so the returned URL is the canonical product page, not a
 // tracked redirect variant.
@@ -67,10 +83,10 @@ async function fetchResultsPage(
  * Second-recourse discovery when a provider's own site search returns
  * nothing: search Google restricted to `siteFilter` for the exact `query`
  * phrase, page 1 then page 2, and return the first result URL that is
- * both plausible (`isPlausibleUrl`) and relevant (`isRelevantMatch`
- * against the result title). Never throws — any failure (network, no
- * candidates) resolves to `null`, which callers must treat as `not_found`,
- * never `error`.
+ * both plausible (`isPlausibleUrl`), relevant (`isRelevantMatch`
+ * against the result title), and on the correct domain (`hostMatches`).
+ * Never throws — any failure (network, no candidates) resolves to `null`,
+ * which callers must treat as `not_found`, never `error`.
  */
 export async function findViaGoogle(
   query: string,
@@ -82,7 +98,10 @@ export async function findViaGoogle(
     if (!html) return null;
 
     const match = extractCandidates(html).find(
-      (c) => isPlausibleUrl(c.url) && isRelevantMatch(query, c.title)
+      (c) =>
+        hostMatches(c.url, siteFilter) &&
+        isPlausibleUrl(c.url) &&
+        isRelevantMatch(query, c.title)
     );
     if (match) return match.url;
   }
