@@ -144,31 +144,25 @@ export async function fetchHtmlViaBrowser(
   try {
     try {
       return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
-    } catch (err) {
-      // TEMP DIAGNOSTIC (2026-07-10, round 2): lowering MAX_CONCURRENT_PAGES
-      // to 2 did not resolve the failures — still erroring in ~5-6s, too
-      // fast even for 2-page contention. Logging again to see whether this
-      // is still the same crash signature or something else entirely.
-      console.error("[browser-fetch] fetchOnce failed (attempt 1)", url, err);
-      // The single shared Chromium process can crash mid-request under
-      // concurrent load (confirmed live 2026-07-10: "Target page, context
-      // or browser has been closed" mid-navigation, Beatport/Traxsource/
-      // Amazon Music all racing the same shared browser for pages at once)
-      // — every provider mid-flight against that browser fails together
-      // unless the dead reference is dropped and a fresh one launched.
-      // Retry exactly once, and only when the browser is confirmed dead;
-      // an ordinary navigation failure (real bot-block, real timeout) with
-      // the browser still alive isn't worth doubling the latency for.
+    } catch {
+      // The shared Chromium process can crash mid-request (confirmed live
+      // 2026-07-10: "Target page, context or browser has been closed"
+      // mid-navigation/mid-wait) — every provider mid-flight against that
+      // browser fails together unless the dead reference is dropped and a
+      // fresh one launched. Retry exactly once, and only when the browser
+      // is confirmed dead; an ordinary navigation failure (real bot-block,
+      // real timeout) with the browser still alive isn't worth doubling
+      // the latency for. Confirmed live 2026-07-10 that even the freshly
+      // relaunched browser can crash again just as fast — this retry
+      // recovers some cases but is not a full fix for what's most likely
+      // a serverless function memory ceiling (see CLAUDE.md).
       if (sharedBrowser && !sharedBrowser.isConnected()) {
         sharedBrowser = null;
         try {
           return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
-        } catch (retryErr) {
-          console.error("[browser-fetch] fetchOnce failed (attempt 2, after relaunch)", url, retryErr);
+        } catch {
           return null;
         }
-      } else {
-        console.error("[browser-fetch] not retrying — browser still reports connected", url);
       }
       return null;
     }
