@@ -103,6 +103,39 @@ describe("traxsourceProvider", () => {
     });
   });
 
+  it("falls back to Google when the first row exists but isn't relevant (regression: irrelevant top result skipped Google entirely)", async () => {
+    // Traxsource's own search ranks by its own signal, not query-token
+    // overlap — an unrelated top row must not short-circuit the Google
+    // fallback the way a fully-empty result list already correctly does.
+    const irrelevantSearchHtml = `<html><body><div class="trk-row">
+      <div class="trk-cell title"><a href="/track/999/unrelated">Totally Unrelated Track</a></div>
+      <div class="trk-cell artists"><a>Someone Else</a></div>
+    </div></body></html>`;
+    const productFixture = readFileSync(
+      join(__dirname, "../fixtures/traxsource-product.html"),
+      "utf-8"
+    );
+    const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.traxsource.com/track/1809532/minus?srsltid=abc"><h3>Robert Hood - Minus [Tresor Records]</h3></a></div></body></html>`;
+
+    mockBrowserFetch.mockImplementation((url: string) => {
+      if (url.startsWith("https://www.traxsource.com/search")) {
+        return Promise.resolve(irrelevantSearchHtml);
+      }
+      if (url.startsWith("https://www.google.com/search")) {
+        return Promise.resolve(googleResultsHtml);
+      }
+      if (url === "https://www.traxsource.com/track/1809532/minus") {
+        return Promise.resolve(productFixture);
+      }
+      throw new Error(`unexpected browser fetch: ${url}`);
+    });
+
+    const result = await traxsourceProvider.search("Robert Hood Minus");
+
+    expect(result.status).toBe("found");
+    expect(result).toMatchObject({ matchedTitle: "Minus", matchedArtist: "Robert Hood" });
+  });
+
   it("stays not_found (never error) when Google finds nothing either", async () => {
     const emptySearchHtml = "<html><body><div class=\"search-list-cont\"></div></body></html>";
     const emptyGoogleHtml = `<!DOCTYPE html><html><body><div id="search"></div></body></html>`;

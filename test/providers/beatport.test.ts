@@ -107,6 +107,37 @@ describe("beatportProvider", () => {
     });
   });
 
+  it("falls back to Google when the first result exists but isn't relevant (regression: irrelevant top result skipped Google entirely)", async () => {
+    // Beatport's own search ranks by its own signal, not query-token
+    // overlap — an unrelated top result must not short-circuit the Google
+    // fallback the way a fully-empty result list already correctly does.
+    const irrelevantSearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[{"track_id":1,"track_name":"Totally Unrelated Track","artists":[{"artist_name":"Someone Else"}]}]}}}}]}}}}</script></body></html>`;
+    const productFixture = readFileSync(
+      join(__dirname, "../fixtures/beatport-product.json"),
+      "utf-8"
+    );
+    const productHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">${productFixture}</script></body></html>`;
+    const googleResultsHtml = `<!DOCTYPE html><html><body><div id="search"><a href="https://www.beatport.com/track/minus/11595385?srsltid=abc"><h3>Robert Hood - Minus (Original Mix) [Tresor Records]</h3></a></div></body></html>`;
+
+    mockBrowserFetch.mockImplementation((url: string) => {
+      if (url.startsWith("https://www.beatport.com/search")) {
+        return Promise.resolve(irrelevantSearchHtml);
+      }
+      if (url.startsWith("https://www.google.com/search")) {
+        return Promise.resolve(googleResultsHtml);
+      }
+      if (url === "https://www.beatport.com/track/minus/11595385") {
+        return Promise.resolve(productHtml);
+      }
+      throw new Error(`unexpected browser fetch: ${url}`);
+    });
+
+    const result = await beatportProvider.search("Robert Hood Minus");
+
+    expect(result.status).toBe("found");
+    expect(result).toMatchObject({ matchedTitle: "Minus", matchedArtist: "Robert Hood" });
+  });
+
   it("stays not_found (never error) when Google finds nothing either", async () => {
     const emptySearchHtml = `<!DOCTYPE html><html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"dehydratedState":{"queries":[{"state":{"data":{"tracks":{"data":[]}}}}]}}}}</script></body></html>`;
     const emptyGoogleHtml = `<!DOCTYPE html><html><body><div id="search"></div></body></html>`;

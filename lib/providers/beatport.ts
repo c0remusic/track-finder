@@ -27,7 +27,7 @@ function extractNextData(html: string): unknown {
   }
 }
 
-function firstTrack(nextData: unknown): BeatportTrack | null {
+function searchTracks(nextData: unknown): BeatportTrack[] {
   const data = nextData as {
     props?: {
       pageProps?: {
@@ -37,9 +37,7 @@ function firstTrack(nextData: unknown): BeatportTrack | null {
       };
     };
   };
-  const tracks = data?.props?.pageProps?.dehydratedState?.queries?.[0]?.state?.data?.tracks?.data;
-  if (!tracks || tracks.length === 0) return null;
-  return tracks[0];
+  return data?.props?.pageProps?.dehydratedState?.queries?.[0]?.state?.data?.tracks?.data ?? [];
 }
 
 type BeatportProductTrack = {
@@ -115,6 +113,14 @@ function slugify(name: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
+function titleAndArtist(track: BeatportTrack): { title: string; artist: string } {
+  const title =
+    track.mix_name && track.mix_name !== "Original Mix"
+      ? `${track.track_name} (${track.mix_name})`
+      : track.track_name;
+  return { title, artist: track.artists?.[0]?.artist_name ?? "" };
+}
+
 export const beatportProvider: Provider = {
   name: "Beatport",
 
@@ -127,7 +133,17 @@ export const beatportProvider: Provider = {
     const nextData = extractNextData(html);
     if (!nextData) return { platform: "Beatport", status: "error" };
 
-    const track = firstTrack(nextData);
+    // Beatport's own search ranks by its own relevance/popularity signal,
+    // not query-token overlap — the correct match isn't always first result
+    // (confirmed real case, 2026-07-10: "Ticon Mona Bone" ranked other Ticon
+    // tracks above the actual "Monda Bone" match). Scan every returned track
+    // for the first one isRelevantMatch accepts, same pattern as Bandcamp's
+    // autocomplete .find(), before falling back to Google.
+    const track = searchTracks(nextData).find((t) => {
+      const { title, artist } = titleAndArtist(t);
+      return isRelevantMatch(query, `${artist} ${title}`);
+    });
+
     if (!track) {
       const googleUrl = await findViaGoogle(
         query,
@@ -138,15 +154,7 @@ export const beatportProvider: Provider = {
       return fetchProductPage(googleUrl, query);
     }
 
-    const title =
-      track.mix_name && track.mix_name !== "Original Mix"
-        ? `${track.track_name} (${track.mix_name})`
-        : track.track_name;
-    const artist = track.artists?.[0]?.artist_name ?? "";
-
-    if (!isRelevantMatch(query, `${artist} ${title}`)) {
-      return { platform: "Beatport", status: "not_found" };
-    }
+    const { title, artist } = titleAndArtist(track);
 
     return {
       platform: "Beatport",

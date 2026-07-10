@@ -102,8 +102,27 @@ export const traxsourceProvider: Provider = {
 
     try {
       const $ = cheerio.load(html);
-      const firstRow = $(".trk-row").first();
-      if (firstRow.length === 0) {
+      // Traxsource's own search ranks by its own relevance/popularity
+      // signal, not query-token overlap — the correct match isn't always
+      // the first row (same class of gap found on Beatport, 2026-07-10:
+      // a differently-spelled or differently-ordered query can rank other
+      // tracks by the same artist above the actual match). Scan every
+      // returned row for the first one isRelevantMatch accepts, same
+      // pattern as Bandcamp's autocomplete .find(), before falling back to
+      // Google — rather than only falling back when zero rows exist.
+      const rows = $(".trk-row").toArray();
+      const match = rows
+        .map((el) => {
+          const row = $(el);
+          const titleLink = row.find(".trk-cell.title a").first();
+          const title = titleLink.text().trim();
+          const href = titleLink.attr("href");
+          const artist = row.find(".trk-cell.artists a").first().text().trim();
+          return { row, title, href, artist };
+        })
+        .find(({ title, href, artist }) => href && title && isRelevantMatch(query, `${artist} ${title}`));
+
+      if (!match) {
         const googleUrl = await findViaGoogle(
           query,
           "traxsource.com/track",
@@ -113,17 +132,7 @@ export const traxsourceProvider: Provider = {
         return fetchProductPage(googleUrl, query);
       }
 
-      const titleLink = firstRow.find(".trk-cell.title a").first();
-      const title = titleLink.text().trim();
-      const href = titleLink.attr("href");
-      if (!href || !title) {
-        return { platform: "Traxsource", status: "not_found" };
-      }
-
-      const artist = firstRow.find(".trk-cell.artists a").first().text().trim();
-      if (!isRelevantMatch(query, `${artist} ${title}`)) {
-        return { platform: "Traxsource", status: "not_found" };
-      }
+      const { row: firstRow, title, href, artist } = match;
 
       const label = firstRow.find(".trk-cell.label a").first().text().trim();
       const cover = firstRow.find(".trk-cell.thumb img").attr("src");
