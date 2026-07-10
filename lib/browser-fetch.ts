@@ -180,7 +180,12 @@ export async function fetchHtmlViaBrowser(
   try {
     try {
       return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
-    } catch {
+    } catch (err) {
+      // TEMP DIAGNOSTIC (2026-07-10, round 3): pinning playwright-core to
+      // 1.56.1 / @sparticuz/chromium to 141.0.0 (matched pre-Chrome-for-
+      // Testing pair) did not resolve the failures either. Need to confirm
+      // whether the error signature actually changed at all.
+      console.error("[browser-fetch] fetchOnce failed (attempt 1)", url, err);
       // The shared Chromium process can crash mid-request (confirmed live
       // 2026-07-10: "Target page, context or browser has been closed"
       // mid-navigation/mid-wait) — every provider mid-flight against that
