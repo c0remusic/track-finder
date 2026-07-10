@@ -1,3 +1,4 @@
+import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
 const BANDCAMP_AUTOCOMPLETE_URL =
@@ -35,7 +36,9 @@ export const bandcampProvider: Provider = {
       if (!response.ok) return { platform: "Bandcamp", status: "error" };
 
       const data = (await response.json()) as BandcampAutocompleteResponse;
-      const track = data.auto?.results?.find((r) => r.type === "t");
+      const track = data.auto?.results?.find(
+        (r) => r.type === "t" && isRelevantMatch(query, `${r.band_name ?? ""} ${r.name}`)
+      );
 
       if (!track || !track.item_url_path) {
         return { platform: "Bandcamp", status: "not_found" };

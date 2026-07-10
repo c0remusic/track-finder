@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
 const TRAXSOURCE_SEARCH_URL = "https://www.traxsource.com/search";
@@ -32,6 +33,10 @@ export const traxsourceProvider: Provider = {
       }
 
       const artist = firstRow.find(".trk-cell.artists a").first().text().trim();
+      if (!isRelevantMatch(query, `${artist} ${title}`)) {
+        return { platform: "Traxsource", status: "not_found" };
+      }
+
       const label = firstRow.find(".trk-cell.label a").first().text().trim();
       const cover = firstRow.find(".trk-cell.thumb img").attr("src");
       const genre = firstRow.find(".trk-cell.genre a").first().text().trim();

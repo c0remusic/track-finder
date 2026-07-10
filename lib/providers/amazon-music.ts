@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { chromium as playwrightCore } from "playwright-core";
 import chromium from "@sparticuz/chromium";
+import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
 const AMAZON_SEARCH_URL = "https://www.amazon.com/s";
@@ -51,6 +52,10 @@ export const amazonMusicProvider: Provider = {
         const cover = firstResult.find("img.s-image").first().attr("src");
 
         if (!asin || !title) {
+          return { platform: "Amazon Music", status: "not_found" };
+        }
+
+        if (!isRelevantMatch(query, `${artist} ${title}`)) {
           return { platform: "Amazon Music", status: "not_found" };
         }
 

@@ -1,3 +1,4 @@
+import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
 const ITUNES_SEARCH_URL = "https://itunes.apple.com/search";
@@ -37,6 +38,10 @@ export const appleMusicProvider: Provider = {
     }
 
     const track = data.results[0];
+    if (!isRelevantMatch(query, `${track.artistName} ${track.trackName}`)) {
+      return { platform: "Apple Music", status: "not_found" };
+    }
+
     return {
       platform: "Apple Music",
       status: "found",

@@ -1,3 +1,4 @@
+import { isRelevantMatch } from "../relevance";
 import type { Provider, ProviderResult } from "./types";
 
 const BEATPORT_SEARCH_URL = "https://www.beatport.com/search";
@@ -74,13 +75,18 @@ export const beatportProvider: Provider = {
       track.mix_name && track.mix_name !== "Original Mix"
         ? `${track.track_name} (${track.mix_name})`
         : track.track_name;
+    const artist = track.artists?.[0]?.artist_name ?? "";
+
+    if (!isRelevantMatch(query, `${artist} ${title}`)) {
+      return { platform: "Beatport", status: "not_found" };
+    }
 
     return {
       platform: "Beatport",
       status: "found",
       purchaseUrl: `https://www.beatport.com/track/${slugify(track.track_name)}/${track.track_id}`,
       coverUrl: track.track_image_uri,
-      matchedArtist: track.artists?.[0]?.artist_name,
+      matchedArtist: artist || undefined,
       matchedTitle: title,
       metadata: {
         bpm: track.bpm,
