@@ -5,6 +5,18 @@
       "date": "2026-07-09",
       "topic": "design MVP track-finder",
       "summary": "Agrégateur de liens d'achat (Beatport/Traxsource/Amazon Music/Bandcamp/Apple Music) + metadata agrégée. Architecture Next.js/orchestrateur/cache/rate-limit, décisions actées pendant le brainstorm, risques légaux/scraping documentés. Mis à jour le 2026-07-10 : révision de la règle d'affichage not_found (voir plan)."
+    },
+    {
+      "path": "docs/superpowers/changes/2026-07-10-remove-metadata-from-search-flow/design.md",
+      "date": "2026-07-10",
+      "topic": "retrait des metadata du flux de recherche actuel",
+      "summary": "Metadata devient une fonctionnalité séparée future (providers/recherche/déclenchement propres) — retirée d'aggregateSearch, de page.tsx et MetadataSection.tsx supprimé. Le contrat ProviderResult.metadata reste inchangé côté providers, juste plus agrégé/affiché pour l'instant. Implémenté et vérifié en direct (47/47 tests)."
+    },
+    {
+      "path": "docs/superpowers/changes/2026-07-10-playwright-cloudflare-bypass/design.md",
+      "date": "2026-07-10",
+      "topic": "Beatport/Traxsource sur Playwright + fix timeout Amazon Music",
+      "summary": "Beatport/Traxsource passent du fetch brut (bloqué par Cloudflare, fingerprint TLS + détection headless) à un vrai Chromium via lib/browser-fetch.ts, module partagé avec Amazon Music. Bug racine découvert en cours d'implémentation : @sparticuz/chromium ne se lance pas du tout en local Windows (ENOENT) — branché désormais sur process.env.VERCEL (Chromium Lambda en prod, Edge système en local). Timeout orchestrateur par provider (15s) + maxDuration=20 sur la route (sinon tué par le cap 10s Hobby de Vercel). Vérifié en direct sur 5 requêtes réelles : 4-5/5 providers trouvent un résultat, plus aucune erreur de crash."
     }
   ],
   "plans": [
