@@ -8,7 +8,7 @@ import { checkRateLimit } from "../../../lib/rate-limit";
 // the per-provider timeout budget the Playwright-based providers now get
 // (see PROVIDER_TIMEOUT_OVERRIDES_MS below). Without this, Vercel would kill
 // the function before those providers' timeout race even resolves.
-export const maxDuration = 40;
+export const maxDuration = 50;
 
 type AggregatedResult = {
   purchase: ProviderResult[];
@@ -31,28 +31,31 @@ const searchCache = new TtlCache<AggregatedResult>(ONE_HOUR_MS);
 const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 
 // Providers that go through a real Chromium instance (see lib/browser-fetch.ts)
-// need more budget than a plain `fetch` — browser launch + navigation alone
-// can take several seconds before any parsing even starts. Beatport/
-// Traxsource/Bandcamp can now chain up to 3 sequential browser launches in
-// their worst case (own search + Google fallback search + Google-found
-// product page — lib/google-search.ts also goes through a real browser as
-// of 2026-07-10, Google serves the same kind of bot-challenge to a plain
-// `fetch` that Cloudflare does). browser-fetch.ts also caps concurrent
-// launches at 2, so when several providers need a fallback simultaneously
-// some of their launches queue instead of all firing at once — the larger
-// budget here accounts for that queueing delay, not just the raw
-// launch+navigate time.
+// need more budget than a plain `fetch`. As of 2026-07-10, browser-fetch.ts
+// keeps ONE shared Chromium process alive across calls instead of launching
+// a fresh one each time — but Beatport/Traxsource can still chain up to 3
+// sequential page navigations in their worst case (own search → Google
+// fallback search → Google-found product page — lib/google-search.ts also
+// goes through a real browser, Google serves the same kind of bot-challenge
+// to a plain `fetch` that Cloudflare does), each with a default
+// `gotoTimeoutMs` of 10s — 30s of goto budget alone before counting launch
+// overhead or queueing. All Playwright-driven providers now draw from a
+// single shared pool of `MAX_CONCURRENT_PAGES = 3` page slots in
+// browser-fetch.ts (not a per-provider limit), so up to 4 providers'
+// simultaneous first calls can mean one queues behind Amazon Music's own
+// ~22.5s internal budget before its own chain even starts. The budgets
+// below leave headroom for that queueing on top of the raw sequential-goto
+// worst case, not just the launch+navigate time (found live 2026-07-10 via
+// code review: the previous numbers had zero margin left once the shared
+// page-slot pool was introduced).
 const PROVIDER_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
   // amazon-music.ts's own internal budget is gotoTimeoutMs (20000) +
-  // postGotoWaitMs (2500) = 22500ms minimum before it can return anything —
-  // this override must clear that plus launch/queueing headroom, or the
-  // orchestrator's timer fires first and reports "error" on exactly the
-  // slow-but-working case this budget exists to accommodate (found live
-  // 2026-07-10 via code review: the two numbers had drifted out of sync).
-  "Amazon Music": 28000,
-  Beatport: 30000,
-  Traxsource: 30000,
-  Bandcamp: 30000,
+  // postGotoWaitMs (2500) = 22500ms minimum before it can return anything,
+  // plus potential queueing behind other providers' page opens.
+  "Amazon Music": 35000,
+  Beatport: 40000,
+  Traxsource: 40000,
+  Bandcamp: 40000,
 };
 
 async function runProvider(

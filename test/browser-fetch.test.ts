@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { launchMock } = vi.hoisted(() => ({ launchMock: vi.fn() }));
 
@@ -13,42 +13,64 @@ vi.mock("@sparticuz/chromium", () => ({
   },
 }));
 
-const { fetchHtmlViaBrowser } = await import("../lib/browser-fetch");
-
-function makeBrowser(html: string) {
-  const page = {
+function makePage(html: string) {
+  return {
     goto: vi.fn().mockResolvedValue(undefined),
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
     content: vi.fn().mockResolvedValue(html),
   };
+}
+
+function makeBrowser() {
   const context = {
-    newPage: vi.fn().mockResolvedValue(page),
+    newPage: vi.fn(),
     addInitScript: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
   };
   const browser = {
     newContext: vi.fn().mockResolvedValue(context),
+    isConnected: vi.fn().mockReturnValue(true),
     close: vi.fn().mockResolvedValue(undefined),
   };
-  return { browser, page, context };
+  return { browser, context };
+}
+
+// The module keeps a shared browser instance alive across calls (see
+// lib/browser-fetch.ts) — `vi.resetModules()` + a fresh dynamic import per
+// test is the only way to get a clean `sharedBrowser`/concurrency-counter
+// state each time, since those live in module scope, not in the mocks.
+async function freshFetchHtmlViaBrowser() {
+  vi.resetModules();
+  const mod = await import("../lib/browser-fetch");
+  return mod.fetchHtmlViaBrowser;
 }
 
 describe("fetchHtmlViaBrowser", () => {
-  afterEach(() => {
+  beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns the page's HTML after navigating", async () => {
-    const { browser } = makeBrowser("<html>ok</html>");
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>ok</html>");
+    context.newPage.mockResolvedValue(page);
     launchMock.mockResolvedValue(browser);
 
     const result = await fetchHtmlViaBrowser("https://example.com");
 
     expect(result).toBe("<html>ok</html>");
-    expect(browser.close).toHaveBeenCalled();
+    // The browser process itself stays alive for reuse; only the context
+    // (and its pages) is torn down after each call.
+    expect(context.close).toHaveBeenCalled();
+    expect(browser.close).not.toHaveBeenCalled();
   });
 
   it("waits the requested amount after navigation when postGotoWaitMs is set", async () => {
-    const { browser, page } = makeBrowser("<html>ok</html>");
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>ok</html>");
+    context.newPage.mockResolvedValue(page);
     launchMock.mockResolvedValue(browser);
 
     await fetchHtmlViaBrowser("https://example.com", { postGotoWaitMs: 2500 });
@@ -57,7 +79,10 @@ describe("fetchHtmlViaBrowser", () => {
   });
 
   it("skips waitForTimeout when postGotoWaitMs is omitted", async () => {
-    const { browser, page } = makeBrowser("<html>ok</html>");
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>ok</html>");
+    context.newPage.mockResolvedValue(page);
     launchMock.mockResolvedValue(browser);
 
     await fetchHtmlViaBrowser("https://example.com");
@@ -66,6 +91,7 @@ describe("fetchHtmlViaBrowser", () => {
   });
 
   it("returns null when the browser fails to launch", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
     launchMock.mockRejectedValue(new Error("launch failed"));
 
     const result = await fetchHtmlViaBrowser("https://example.com");
@@ -73,64 +99,91 @@ describe("fetchHtmlViaBrowser", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when navigation throws (e.g. timeout)", async () => {
-    const { browser, page } = makeBrowser("<html>ok</html>");
+  it("returns null when navigation throws (e.g. timeout), still closing the context", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    const page = makePage("<html>ok</html>");
     page.goto.mockRejectedValue(new Error("timeout"));
+    context.newPage.mockResolvedValue(page);
     launchMock.mockResolvedValue(browser);
 
     const result = await fetchHtmlViaBrowser("https://example.com");
 
     expect(result).toBeNull();
-    expect(browser.close).toHaveBeenCalled();
+    expect(context.close).toHaveBeenCalled();
   });
 
-  it("queues launches beyond the concurrency cap and releases the slot when one finishes", async () => {
-    const first = makeBrowser("<html>1</html>");
-    const second = makeBrowser("<html>2</html>");
-    const third = makeBrowser("<html>3</html>");
+  it("reuses the shared browser across calls instead of relaunching", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    context.newPage.mockImplementation(() => Promise.resolve(makePage("<html>ok</html>")));
+    launchMock.mockResolvedValue(browser);
 
-    // Both left pending so this test controls exactly when each slot frees
-    // up — must resolve both before the end, or the module-level
-    // activeBrowsers/browserSlotWaiters state (shared across this whole
-    // test file) leaks a permanently-held slot into later tests.
+    await fetchHtmlViaBrowser("https://example.com/1");
+    await fetchHtmlViaBrowser("https://example.com/2");
+    await fetchHtmlViaBrowser("https://example.com/3");
+
+    expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(browser.newContext).toHaveBeenCalledTimes(3);
+  });
+
+  it("relaunches if the shared browser has disconnected", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const first = makeBrowser();
+    first.context.newPage.mockResolvedValue(makePage("<html>1</html>"));
+    const second = makeBrowser();
+    second.context.newPage.mockResolvedValue(makePage("<html>2</html>"));
+
+    launchMock.mockResolvedValueOnce(first.browser).mockResolvedValueOnce(second.browser);
+
+    await fetchHtmlViaBrowser("https://example.com/1");
+    first.browser.isConnected.mockReturnValue(false);
+
+    const result = await fetchHtmlViaBrowser("https://example.com/2");
+
+    expect(result).toBe("<html>2</html>");
+    expect(launchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("queues page opens beyond the concurrency cap and releases the slot when one finishes", async () => {
+    const fetchHtmlViaBrowser = await freshFetchHtmlViaBrowser();
+    const { browser, context } = makeBrowser();
+    launchMock.mockResolvedValue(browser);
+
+    const pages = [makePage("<html>1</html>"), makePage("<html>2</html>"), makePage("<html>3</html>"), makePage("<html>4</html>")];
     let resolveFirstGoto: () => void = () => {};
-    let resolveSecondGoto: () => void = () => {};
-    first.page.goto.mockImplementation(
+    pages[0].goto.mockImplementation(
       () => new Promise<void>((resolve) => (resolveFirstGoto = resolve))
     );
-    second.page.goto.mockImplementation(
-      () => new Promise<void>((resolve) => (resolveSecondGoto = resolve))
-    );
+    pages[1].goto.mockImplementation(() => new Promise<void>(() => {})); // stays pending, released at the end
+    pages[2].goto.mockImplementation(() => new Promise<void>(() => {})); // stays pending, released at the end
+    // pages[3] (the queued 4th call) resolves immediately once it gets a slot.
 
-    launchMock
-      .mockResolvedValueOnce(first.browser)
-      .mockResolvedValueOnce(second.browser)
-      .mockResolvedValueOnce(third.browser);
+    let callIndex = 0;
+    context.newPage.mockImplementation(() => Promise.resolve(pages[callIndex++]));
 
     const p1 = fetchHtmlViaBrowser("https://example.com/1");
     const p2 = fetchHtmlViaBrowser("https://example.com/2");
     const p3 = fetchHtmlViaBrowser("https://example.com/3");
+    const p4 = fetchHtmlViaBrowser("https://example.com/4");
 
-    // Let the two allowed launches (MAX_CONCURRENT_BROWSERS = 2) start; the
-    // third should still be queued, so launch() has only been called twice.
-    // Each call chains several real awaits before reaching page.goto()
-    // (acquireBrowserSlot -> launchBrowser -> newContext -> addInitScript ->
-    // newPage -> goto), so poll rather than guess a fixed microtask-tick
-    // count.
-    await vi.waitFor(() => expect(launchMock).toHaveBeenCalledTimes(2));
-    expect(launchMock).not.toHaveBeenCalledTimes(3);
+    // MAX_CONCURRENT_PAGES = 3 — the 4th call's newPage() should not have
+    // been reached yet.
+    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(3));
+    expect(context.newPage).not.toHaveBeenCalledTimes(4);
 
-    // Finishing the first call frees a slot for the queued third call.
     resolveFirstGoto();
     await p1;
-    await vi.waitFor(() => expect(launchMock).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(context.newPage).toHaveBeenCalledTimes(4));
 
-    const result3 = await p3;
-    expect(result3).toBe("<html>3</html>");
-    expect(third.browser.close).toHaveBeenCalled();
+    const result4 = await p4;
+    expect(result4).toBe("<html>4</html>");
 
-    // Free p2's slot too, so no state leaks into the next test.
-    resolveSecondGoto();
-    await p2;
+    // Free the two still-pending calls so no state leaks into later tests
+    // in this file (module state persists unless freshFetchHtmlViaBrowser
+    // resets it, which the next test will do independently — but nothing
+    // here should keep unresolved promises alive after this test ends).
+    void p2;
+    void p3;
   });
 });

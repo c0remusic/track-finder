@@ -128,15 +128,21 @@ silencieux), incarnée concrètement dans ce code :
   `lib/google-search.ts` passe donc par `lib/browser-fetch.ts` comme les
   providers scrapés. `MAX_PAGES=1` (chaque page Google est un lancement de
   navigateur, pas un fetch HTTP léger).
-- **`lib/browser-fetch.ts` limite les lancements de navigateur concurrents**
-  (`MAX_CONCURRENT_BROWSERS=2`) — sans cette limite, une requête où
-  plusieurs providers ont besoin d'un fallback simultanément peut saturer
-  la boucle d'événements Node au point que les `setTimeout` de
-  l'orchestrateur se déclenchent en retard sur le vrai travail (constaté :
-  24s, 4 providers rapportant "error" au lieu de "not_found"). Toute
-  surcharge de timeout par provider dans `route.ts` doit tenir compte de
-  cette file d'attente, pas seulement du temps de lancement brut d'un seul
-  navigateur.
+- **`lib/browser-fetch.ts` garde un seul processus Chromium partagé en vie**
+  (relancé seulement si `browser.isConnected()` renvoie faux) au lieu d'en
+  lancer un nouveau à chaque appel — un lancement coûte 1-3s, ouvrir une
+  page dans un navigateur déjà lancé quelques centaines de ms (perf,
+  2026-07-10 : 9-24s+erreurs → 7-9s sans erreur sur les mêmes requêtes). Le
+  limiteur de concurrence porte maintenant sur les **pages** ouvertes, pas
+  les processus navigateur (`MAX_CONCURRENT_PAGES=3`, partagé entre TOUS
+  les providers Playwright, pas par provider) — sans cette limite, une
+  requête où plusieurs providers ont besoin d'un fallback simultanément
+  peut saturer la boucle d'événements Node au point que les `setTimeout`
+  de l'orchestrateur se déclenchent en retard sur le vrai travail (constaté
+  avant ce fix : 24s, 4 providers rapportant "error" au lieu de
+  "not_found"). Toute surcharge de timeout par provider dans `route.ts`
+  doit tenir compte de cette file d'attente partagée entre providers, pas
+  seulement du temps de navigation brut d'un seul appel.
 
 ## Risque légal (scraping)
 

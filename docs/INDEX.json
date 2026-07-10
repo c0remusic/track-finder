@@ -29,6 +29,12 @@
       "date": "2026-07-10",
       "topic": "fallback Google pour Bandcamp + fix concurrence navigateur",
       "summary": "Signalement direct : \"mona bone ticon\" ne trouvait pas un morceau Bandcamp pourtant réel — l'autocomplete Bandcamp échoue sur les requêtes combinées artiste+titre à 3 mots. Fallback Google ajouté à bandcamp.ts (même pattern que Beatport/Traxsource). Découvertes en cascade pendant la vérification : Google bloque aussi le fetch brut (même famille de détection que Cloudflare, google-search.ts bascule sur fetchHtmlViaBrowser) ; jusqu'à 4 providers pouvant lancer un navigateur simultanément causait une vraie contention de ressources (24s, 4 providers en \"error\" au lieu de \"not_found\") — corrigé par un sémaphore de concurrence (MAX_CONCURRENT_BROWSERS=2) dans browser-fetch.ts, timeouts orchestrateur réajustés en conséquence. Revue de code : 1 finding critique confirmé (budget Amazon Music mal calibré) et corrigé, 1 gap de test comblé. Vérifié en direct : Bandcamp trouve désormais le morceau, 54/54 tests."
+    },
+    {
+      "path": "docs/superpowers/changes/2026-07-10-shared-browser-reuse-perf/design.md",
+      "date": "2026-07-10",
+      "topic": "réutilisation du navigateur partagé (perf)",
+      "summary": "Demande directe (\"on peut améliorer la vitesse ?\") après un exemple montrant Traxsource/Amazon Music en erreur technique. browser-fetch.ts lançait un nouveau processus Chromium complet à chaque appel (2-3 fois par recherche par provider) — passe à un seul processus partagé réutilisé entre appels (relancé seulement si déconnecté), chaque appel n'ouvrant plus qu'un context+page léger. Sémaphore de concurrence passé de 2 navigateurs à 3 pages (coût par unité bien moindre). Vérifié en direct : 9.2s à froid, 7.5s à chaud, zéro erreur technique sur la requête exacte du signalement précédent (contre 2 erreurs avant). Revue de code : commentaire obsolète corrigé + budgets de timeout recalculés (plus de marge réelle sous le nouveau modèle de contention par page partagée entre 4 providers). 56/56 tests."
     }
   ],
   "plans": [

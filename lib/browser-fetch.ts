@@ -18,36 +18,60 @@ const USER_AGENT =
 // low-cost baseline.
 const ANTI_DETECTION_ARGS = ["--disable-blink-features=AutomationControlled"];
 
-// A single search can trigger several providers' Playwright fallbacks at
-// once (Beatport, Traxsource, Bandcamp, Amazon Music all go through this
-// module) — without a cap, a query that fails everywhere can spin up 6-8
-// concurrent Chromium instances, which starves the event loop badly enough
-// that setTimeout-based timeouts fire late too (verified live 2026-07-10:
-// a single request took 24s wall-clock and 4 providers all mis-reported
-// "error" instead of a clean "not_found", despite each having an 18s
-// budget). Queueing extra launches behind a small concurrency cap keeps
-// each running browser's CPU/memory share high enough to behave
-// predictably, at the cost of some queued providers waiting longer.
-const MAX_CONCURRENT_BROWSERS = 2;
-let activeBrowsers = 0;
-const browserSlotWaiters: (() => void)[] = [];
+// A single search can call this module several times (Beatport, Traxsource,
+// Bandcamp and Amazon Music can each need 1-3 browser round trips). Launching
+// a fresh Chromium *process* per call was the dominant cost (1-3s each) and,
+// worse, the earlier version also closed it after every call — verified live
+// 2026-07-10 that this made 4+ providers spinning up 6-8 concurrent full
+// browser processes starve Node's event loop badly enough that orchestrator
+// timeouts fired late. Keeping ONE browser process alive for the life of
+// this module (a warm Lambda container, or the whole `next dev` process
+// locally) and opening a lightweight context+page per call instead cuts
+// nearly all of that cost: only the very first call in a cold start pays for
+// a real launch.
+let sharedBrowser: Browser | null = null;
+let sharedBrowserPromise: Promise<Browser> | null = null;
 
-function acquireBrowserSlot(): Promise<void> {
-  if (activeBrowsers < MAX_CONCURRENT_BROWSERS) {
-    activeBrowsers++;
+async function getSharedBrowser(): Promise<Browser> {
+  if (sharedBrowser?.isConnected()) return sharedBrowser;
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = launchBrowser()
+      .then((browser) => {
+        sharedBrowser = browser;
+        return browser;
+      })
+      .finally(() => {
+        sharedBrowserPromise = null;
+      });
+  }
+  return sharedBrowserPromise;
+}
+
+// Concurrent *pages* in the shared browser are still capped — a page is far
+// cheaper than a whole browser process, but Chromium still spawns a
+// renderer per page, so an unbounded burst (e.g. every provider's fallback
+// triggering at once) could still contend for CPU. The cap is looser than
+// the old per-browser-process limit since the unit is cheaper now.
+const MAX_CONCURRENT_PAGES = 3;
+let activePages = 0;
+const pageSlotWaiters: (() => void)[] = [];
+
+function acquirePageSlot(): Promise<void> {
+  if (activePages < MAX_CONCURRENT_PAGES) {
+    activePages++;
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    browserSlotWaiters.push(() => {
-      activeBrowsers++;
+    pageSlotWaiters.push(() => {
+      activePages++;
       resolve();
     });
   });
 }
 
-function releaseBrowserSlot(): void {
-  activeBrowsers--;
-  browserSlotWaiters.shift()?.();
+function releasePageSlot(): void {
+  activePages--;
+  pageSlotWaiters.shift()?.();
 }
 
 async function launchBrowser(): Promise<Browser> {
@@ -82,11 +106,11 @@ export async function fetchHtmlViaBrowser(
 ): Promise<string | null> {
   const { gotoTimeoutMs = 10000, postGotoWaitMs = 0 } = opts;
 
-  await acquireBrowserSlot();
+  await acquirePageSlot();
   try {
-    const browser = await launchBrowser();
+    const browser = await getSharedBrowser();
+    const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
     try {
-      const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
       await context.addInitScript(() => {
         Object.defineProperty(navigator, "webdriver", { get: () => undefined });
       });
@@ -95,11 +119,17 @@ export async function fetchHtmlViaBrowser(
       if (postGotoWaitMs > 0) await page.waitForTimeout(postGotoWaitMs);
       return await page.content();
     } finally {
-      await browser.close();
+      await context.close();
     }
   } catch {
+    // The shared browser process itself may have crashed/disconnected —
+    // drop the reference so the next call relaunches instead of repeatedly
+    // failing against a dead browser.
+    if (sharedBrowser && !sharedBrowser.isConnected()) {
+      sharedBrowser = null;
+    }
     return null;
   } finally {
-    releaseBrowserSlot();
+    releasePageSlot();
   }
 }
