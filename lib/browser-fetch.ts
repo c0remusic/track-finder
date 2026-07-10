@@ -1,6 +1,24 @@
 import { chromium as playwrightCore, type Browser } from "playwright-core";
 import sparticuzChromium from "@sparticuz/chromium";
 
+// playwright-core and @sparticuz/chromium are PINNED (exact versions, no
+// caret) to 1.56.1 / 141.0.0 in package.json, not incidental. Root cause,
+// confirmed live 2026-07-10: playwright-core 1.57+ launches "Chrome for
+// Testing" / chrome-headless-shell builds instead of vanilla open-source
+// Chromium — a documented breaking change (microsoft/playwright#38489,
+// reports of 20GB+ memory per instance and crashes under normal load).
+// @sparticuz/chromium bundles vanilla open-source Chromium, built for low
+// Lambda memory footprints, not Chrome for Testing. Running the two
+// mismatched (playwright-core 1.61.1 + @sparticuz/chromium 149.0.0) meant
+// every real page load crashed almost immediately in production — "Target
+// page, context or browser has been closed" mid-navigation, independent of
+// concurrency or memory tuning (both were tried first and neither helped,
+// which is what pointed at a binary/protocol mismatch instead of resource
+// pressure). 1.56.1 is the last playwright-core release before the switch;
+// 141.0.0 is the @sparticuz/chromium release bundling the matching
+// Chromium 141 build. Bumping either package requires re-verifying this
+// pairing live, not just checking semver ranges.
+
 // Cloudflare/Akamai-class bot management fingerprints both the TLS handshake
 // (undici's `fetch` gets a "Just a moment..." challenge even with a browser
 // User-Agent, while curl/a real browser passes with identical headers) and
