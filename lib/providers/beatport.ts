@@ -128,25 +128,10 @@ export const beatportProvider: Provider = {
     const url = `${BEATPORT_SEARCH_URL}?q=${encodeURIComponent(query)}`;
 
     const html = await fetchHtmlViaBrowser(url);
-    if (!html) {
-      // TEMP DIAGNOSTIC (2026-07-10): Beatport is the only provider still
-      // failing after fixing the shared-browser crash (Traxsource/Amazon
-      // Music now recover reliably) — need to see whether this is still a
-      // browser-level failure (html null) or a page-content issue (below).
-      console.error("[beatport] fetchHtmlViaBrowser returned null for", url);
-      return { platform: "Beatport", status: "error" };
-    }
+    if (!html) return { platform: "Beatport", status: "error" };
 
     const nextData = extractNextData(html);
-    if (!nextData) {
-      console.error(
-        "[beatport] no __NEXT_DATA__ found, html length",
-        html.length,
-        "first 500 chars:",
-        html.slice(0, 500)
-      );
-      return { platform: "Beatport", status: "error" };
-    }
+    if (!nextData) return { platform: "Beatport", status: "error" };
 
     // Beatport's own search ranks by its own relevance/popularity signal,
     // not query-token overlap — the correct match isn't always first result
