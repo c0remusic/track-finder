@@ -10,6 +10,19 @@ paths:
 
 # Playwright / Chromium serverless — règles
 
+## Index symptôme → emplacement (débug rapide, avant de relire toute la section)
+
+| Symptôme observé | Cause | Où regarder |
+|---|---|---|
+| `spawn ...\Temp\chromium ENOENT` en local Windows | `@sparticuz/chromium` est un binaire Lambda-only | `browser-fetch.ts`, branche `process.env.VERCEL` |
+| `error` occasionnel isolé sur Beatport/Traxsource/Amazon Music | Blocage anti-bot probabiliste, pas forcément une régression | Vérifier si ça se reproduit avant de toucher au code |
+| Page de challenge "enablejs" sur une recherche Google | Google bloque le `fetch` brut comme Cloudflare | `lib/google-search.ts` → doit passer par `browser-fetch.ts` |
+| 4 providers en `error` simultané, requête à ~24s | Contention sur `MAX_CONCURRENT_PAGES`, `setTimeout` de l'orchestrateur en retard | `browser-fetch.ts`, limiteur de concurrence partagé |
+| Retry de récupération sur crash qui ne se déclenche jamais en prod | `browser.isConnected()` reste `true` après un crash réel | Utiliser `isSharedBrowserClosedError` à la place |
+| Traxsource/Amazon Music passent d'échec quasi-systématique à succès après un changement de flags Chromium | `--single-process` était activé | Vérifier qu'il est bien absent des args de lancement |
+| Navigateur partagé qui plante en prod sans rapport avec charge/mémoire, après une mise à jour de package | `playwright-core` 1.57+ change le binaire Chromium livré | Vérifier le pinning exact de `playwright-core`/`@sparticuz/chromium` |
+| Contention qui s'aggrave sur les requêtes suivantes après un timeout provider | Le slot de page reste occupé ~40s après l'abandon HTTP | Vérifier que `AbortSignal` est bien propagé jusqu'à `fetchHtmlViaBrowser` |
+
 - **`@sparticuz/chromium` est un binaire Lambda-only** — ne se lance jamais
   en local sur Windows (`spawn ...\Temp\chromium ENOENT`, confirmé
   2026-07-10). Tout provider scrapé via Playwright doit passer par

@@ -108,6 +108,22 @@ nommé pour chacune, à reconsidérer si le trigger se produit :
   Trigger de réouverture : demande explicite de réintroduire l'affichage
   metadata, avec ses propres providers/déclenchement dédiés plutôt que
   greffée sur le flux de recherche actuel.
+
+  Étapes de réactivation (mode maintenance — ce qui a été retiré, pas ce
+  qu'il faut construire pour la vraie feature séparée) :
+  1. `app/api/search/route.ts` — `aggregateSearch` ne construit plus
+     `metadata` (`buildMetadata`, `AggregatedMetadata`, le champ `metadata`
+     sur `AggregatedResult` ont été supprimés). `ProviderResult.metadata`
+     existe toujours côté contrat (`lib/providers/types.ts`), donc les
+     données sont déjà là — seule l'agrégation est à refaire.
+  2. `components/MetadataSection.tsx` a été supprimé — récupérable dans
+     l'historique git (commit du retrait, voir
+     `docs/superpowers/changes/archive/2026-07-10-remove-metadata-from-search-flow/design.md`).
+  3. `app/page.tsx` — réimporter et réafficher la section metadata à côté
+     de "Où acheter".
+  4. Ne pas se contenter de restaurer tel quel : le design original
+     documente explicitement que la vraie feature veut ses propres
+     providers/déclenchement, pas juste un rebranchement de l'ancien code.
 - **Apify `google-search-scraper` pour le fallback Google** — évalué et
   écarté le 2026-07-13 (voir memory `project_apify_google_scraper_decision`)
   : `lib/google-search.ts` fait déjà le même travail en interne, pas de
