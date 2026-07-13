@@ -62,21 +62,25 @@ function parseProductPage(html: string): TraxsourceProductTrack | null {
   };
 }
 
-async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
+async function fetchProductPage(
+  url: string,
+  query: string,
+  signal?: AbortSignal
+): Promise<ProviderResult> {
   // A Google-found URL that's now unreachable is "no usable result", not a
   // Traxsource-side technical failure — stays not_found, never error.
-  const html = await fetchHtmlViaBrowser(url);
-  if (!html) return { platform: "Traxsource", status: "not_found" };
+  const html = await fetchHtmlViaBrowser(url, { signal });
+  if (!html) return { platform: traxsourceProvider.name, status: "not_found" };
 
   const track = parseProductPage(html);
-  if (!track) return { platform: "Traxsource", status: "not_found" };
+  if (!track) return { platform: traxsourceProvider.name, status: "not_found" };
 
   if (!isRelevantMatch(query, `${track.artist} ${track.title}`)) {
-    return { platform: "Traxsource", status: "not_found" };
+    return { platform: traxsourceProvider.name, status: "not_found" };
   }
 
   return {
-    platform: "Traxsource",
+    platform: traxsourceProvider.name,
     status: "found",
     purchaseUrl: url,
     coverUrl: track.cover,
@@ -94,11 +98,11 @@ async function fetchProductPage(url: string, query: string): Promise<ProviderRes
 export const traxsourceProvider: Provider = {
   name: "Traxsource",
 
-  async search(query: string): Promise<ProviderResult> {
+  async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${TRAXSOURCE_SEARCH_URL}?term=${encodeURIComponent(query)}`;
 
-    const html = await fetchHtmlViaBrowser(url);
-    if (!html) return { platform: "Traxsource", status: "error" };
+    const html = await fetchHtmlViaBrowser(url, { signal });
+    if (!html) return { platform: traxsourceProvider.name, status: "error" };
 
     try {
       const $ = cheerio.load(html);
@@ -126,10 +130,11 @@ export const traxsourceProvider: Provider = {
         const googleUrl = await findViaGoogle(
           query,
           "traxsource.com/track",
-          (u) => /\/track\//.test(u)
+          (u) => /\/track\//.test(u),
+          signal
         );
-        if (!googleUrl) return { platform: "Traxsource", status: "not_found" };
-        return fetchProductPage(googleUrl, query);
+        if (!googleUrl) return { platform: traxsourceProvider.name, status: "not_found" };
+        return fetchProductPage(googleUrl, query, signal);
       }
 
       const { row: firstRow, title, href, artist } = match;
@@ -148,7 +153,7 @@ export const traxsourceProvider: Provider = {
       const bpm = bpmRaw ? Number(bpmRaw) : undefined;
 
       return {
-        platform: "Traxsource",
+        platform: traxsourceProvider.name,
         status: "found",
         purchaseUrl: `https://www.traxsource.com${href}`,
         coverUrl: cover,
@@ -162,7 +167,7 @@ export const traxsourceProvider: Provider = {
         },
       };
     } catch {
-      return { platform: "Traxsource", status: "error" };
+      return { platform: traxsourceProvider.name, status: "error" };
     }
   },
 };

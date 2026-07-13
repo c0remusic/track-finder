@@ -19,31 +19,34 @@ type ITunesSearchResponse = {
 export const appleMusicProvider: Provider = {
   name: "Apple Music",
 
-  async search(query: string): Promise<ProviderResult> {
+  async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${ITUNES_SEARCH_URL}?term=${encodeURIComponent(query)}&entity=song&limit=1`;
 
     let data: ITunesSearchResponse;
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const timeout = AbortSignal.timeout(6000);
+      const response = await fetch(url, {
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      });
       if (!response.ok) {
-        return { platform: "Apple Music", status: "error" };
+        return { platform: appleMusicProvider.name, status: "error" };
       }
       data = await response.json();
     } catch {
-      return { platform: "Apple Music", status: "error" };
+      return { platform: appleMusicProvider.name, status: "error" };
     }
 
     if (data.resultCount === 0 || data.results.length === 0) {
-      return { platform: "Apple Music", status: "not_found" };
+      return { platform: appleMusicProvider.name, status: "not_found" };
     }
 
     const track = data.results[0];
     if (!isRelevantMatch(query, `${track.artistName} ${track.trackName}`)) {
-      return { platform: "Apple Music", status: "not_found" };
+      return { platform: appleMusicProvider.name, status: "not_found" };
     }
 
     return {
-      platform: "Apple Music",
+      platform: appleMusicProvider.name,
       status: "found",
       purchaseUrl: track.trackViewUrl,
       coverUrl: track.artworkUrl100,

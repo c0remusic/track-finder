@@ -34,4 +34,19 @@ describe("checkRateLimit", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("bounds requests via an in-memory fallback once Redis is down for a run of calls", async () => {
+    const ip = "9.9.9.9";
+    limitMock.mockRejectedValue(new Error("Upstash outage"));
+
+    const results = [];
+    for (let i = 0; i < 21; i++) {
+      results.push((await checkRateLimit(ip)).success);
+    }
+
+    // First 20 calls within the window pass the in-memory fallback; the
+    // 21st is over the same 20-per-60s ceiling the Redis limiter enforces.
+    expect(results.slice(0, 20)).toEqual(Array(20).fill(true));
+    expect(results[20]).toBe(false);
+  });
 });

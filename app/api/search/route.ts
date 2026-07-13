@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { allProviders } from "../../../lib/providers";
+import { PROVIDER_NAMES } from "../../../lib/providers/names";
 import type { Provider, ProviderResult } from "../../../lib/providers/types";
 import { TtlCache } from "../../../lib/cache";
 import { checkRateLimit } from "../../../lib/rate-limit";
@@ -56,7 +57,10 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 8000;
 // worst case, not just the launch+navigate time (found live 2026-07-10 via
 // code review: the previous numbers had zero margin left once the shared
 // page-slot pool was introduced).
-const PROVIDER_TIMEOUT_OVERRIDES_MS: Record<string, number> = {
+// Keyed against PROVIDER_NAMES (not a bare `Record<string, number>`) so a
+// provider rename that forgets to update this map fails at compile time
+// instead of silently falling back to DEFAULT_PROVIDER_TIMEOUT_MS.
+const PROVIDER_TIMEOUT_OVERRIDES_MS: Partial<Record<(typeof PROVIDER_NAMES)[number], number>> = {
   // amazon-music.ts's own internal budget is gotoTimeoutMs (20000) +
   // postGotoWaitMs (2500) = 22500ms minimum before it can return anything,
   // plus potential queueing behind other providers' page opens.
@@ -71,18 +75,31 @@ async function runProvider(
   query: string,
   timeoutMs: number = DEFAULT_PROVIDER_TIMEOUT_MS
 ): Promise<ProviderResult> {
-  timeoutMs = PROVIDER_TIMEOUT_OVERRIDES_MS[provider.name] ?? timeoutMs;
+  const override = (PROVIDER_TIMEOUT_OVERRIDES_MS as Record<string, number | undefined>)[
+    provider.name
+  ];
+  timeoutMs = override ?? timeoutMs;
   const timeoutResult: ProviderResult = { platform: provider.name, status: "error" };
+
+  // Aborted once the timeout below wins the race, so a provider still
+  // holding the shared Chromium page slot (lib/browser-fetch.ts) releases
+  // it immediately instead of running to its own internal timeout — up to
+  // ~40s more of an already-abandoned request otherwise queueing up the
+  // page slot for every other provider in flight.
+  const controller = new AbortController();
 
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<ProviderResult>((resolve) => {
-    timer = setTimeout(() => resolve(timeoutResult), timeoutMs);
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(timeoutResult);
+    }, timeoutMs);
   });
 
   // Keep a direct handle on the search promise and attach a no-op catch so
   // that if it rejects AFTER the timeout has already won the race, Node
   // doesn't report an unhandled promise rejection in the background.
-  const searchPromise = provider.search(query);
+  const searchPromise = provider.search(query, controller.signal);
   searchPromise.catch(() => {});
 
   try {

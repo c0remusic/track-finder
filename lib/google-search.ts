@@ -81,7 +81,8 @@ function extractCandidates(html: string): Candidate[] {
 async function fetchResultsPage(
   query: string,
   siteFilter: string,
-  page: number
+  page: number,
+  signal?: AbortSignal
 ): Promise<string | null> {
   const params = new URLSearchParams({
     q: `site:${siteFilter} ${query}`,
@@ -89,7 +90,7 @@ async function fetchResultsPage(
   });
   if (page > 0) params.set("start", String(page * RESULTS_PER_PAGE));
 
-  return fetchHtmlViaBrowser(`${GOOGLE_SEARCH_URL}?${params.toString()}`);
+  return fetchHtmlViaBrowser(`${GOOGLE_SEARCH_URL}?${params.toString()}`, { signal });
 }
 
 /**
@@ -105,10 +106,11 @@ async function fetchResultsPage(
 export async function findViaGoogle(
   query: string,
   siteFilter: string,
-  isPlausibleUrl: (url: string) => boolean
+  isPlausibleUrl: (url: string) => boolean,
+  signal?: AbortSignal
 ): Promise<string | null> {
   for (let page = 0; page < MAX_PAGES; page++) {
-    const html = await fetchResultsPage(query, siteFilter, page);
+    const html = await fetchResultsPage(query, siteFilter, page, signal);
     if (!html) return null;
 
     const match = extractCandidates(html).find(

@@ -39,32 +39,37 @@ function parseTralbum(html: string): BandcampTralbum | null {
   }
 }
 
-async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
+async function fetchProductPage(
+  url: string,
+  query: string,
+  signal?: AbortSignal
+): Promise<ProviderResult> {
   let html: string;
   try {
+    const timeout = AbortSignal.timeout(3000);
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(3000),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       headers: { "User-Agent": "Mozilla/5.0 (compatible; track-finder/1.0)" },
     });
     // A Google-found URL that's now unreachable is "no usable result", not
     // a Bandcamp-side technical failure — stays not_found, never error.
-    if (!response.ok) return { platform: "Bandcamp", status: "not_found" };
+    if (!response.ok) return { platform: bandcampProvider.name, status: "not_found" };
     html = await response.text();
   } catch {
-    return { platform: "Bandcamp", status: "not_found" };
+    return { platform: bandcampProvider.name, status: "not_found" };
   }
 
   const tralbum = parseTralbum(html);
   const title = tralbum?.current?.title;
-  if (!title) return { platform: "Bandcamp", status: "not_found" };
+  if (!title) return { platform: bandcampProvider.name, status: "not_found" };
 
   const artist = tralbum?.artist ?? "";
   if (!isRelevantMatch(query, `${artist} ${title}`)) {
-    return { platform: "Bandcamp", status: "not_found" };
+    return { platform: bandcampProvider.name, status: "not_found" };
   }
 
   return {
-    platform: "Bandcamp",
+    platform: bandcampProvider.name,
     status: "found",
     purchaseUrl: url,
     matchedArtist: artist || undefined,
@@ -75,8 +80,9 @@ async function fetchProductPage(url: string, query: string): Promise<ProviderRes
 export const bandcampProvider: Provider = {
   name: "Bandcamp",
 
-  async search(query: string): Promise<ProviderResult> {
+  async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     try {
+      const timeout = AbortSignal.timeout(6000);
       const response = await fetch(BANDCAMP_AUTOCOMPLETE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,10 +92,10 @@ export const bandcampProvider: Provider = {
           full_page: false,
           fan_id: null,
         }),
-        signal: AbortSignal.timeout(6000),
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       });
 
-      if (!response.ok) return { platform: "Bandcamp", status: "error" };
+      if (!response.ok) return { platform: bandcampProvider.name, status: "error" };
 
       const data = (await response.json()) as BandcampAutocompleteResponse;
       const track = data.auto?.results?.find(
@@ -97,15 +103,18 @@ export const bandcampProvider: Provider = {
       );
 
       if (!track || !track.item_url_path) {
-        const googleUrl = await findViaGoogle(query, "bandcamp.com", (u) =>
-          /\/(track|album)\//.test(u)
+        const googleUrl = await findViaGoogle(
+          query,
+          "bandcamp.com",
+          (u) => /\/(track|album)\//.test(u),
+          signal
         );
-        if (!googleUrl) return { platform: "Bandcamp", status: "not_found" };
-        return fetchProductPage(googleUrl, query);
+        if (!googleUrl) return { platform: bandcampProvider.name, status: "not_found" };
+        return fetchProductPage(googleUrl, query, signal);
       }
 
       return {
-        platform: "Bandcamp",
+        platform: bandcampProvider.name,
         status: "found",
         purchaseUrl: track.item_url_path,
         coverUrl: track.img,
@@ -113,7 +122,7 @@ export const bandcampProvider: Provider = {
         matchedTitle: track.name,
       };
     } catch {
-      return { platform: "Bandcamp", status: "error" };
+      return { platform: bandcampProvider.name, status: "error" };
     }
   },
 };

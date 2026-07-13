@@ -86,16 +86,38 @@ const MAX_CONCURRENT_PAGES = 1;
 let activePages = 0;
 const pageSlotWaiters: (() => void)[] = [];
 
-function acquirePageSlot(): Promise<void> {
+// If the caller's signal aborts while still queued for a page slot, drop out
+// of the queue immediately instead of waiting to be granted a slot the
+// caller no longer needs — otherwise an orchestrator-abandoned request
+// (route.ts's per-provider timeout) still occupies a queue position and
+// delays every other provider's page slot behind it.
+function acquirePageSlot(signal?: AbortSignal): Promise<void> {
   if (activePages < MAX_CONCURRENT_PAGES) {
     activePages++;
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
-    pageSlotWaiters.push(() => {
+  return new Promise((resolve, reject) => {
+    const waiter = () => {
       activePages++;
       resolve();
-    });
+    };
+    pageSlotWaiters.push(waiter);
+    if (signal) {
+      signal.addEventListener(
+        "abort",
+        () => {
+          const idx = pageSlotWaiters.indexOf(waiter);
+          // If the waiter already fired (idx === -1), the slot was granted
+          // right as the abort landed — too late to cancel the wait, the
+          // caller's own post-acquire signal check handles that case.
+          if (idx !== -1) {
+            pageSlotWaiters.splice(idx, 1);
+            reject(new Error("aborted-while-queued"));
+          }
+        },
+        { once: true }
+      );
+    }
   });
 }
 
@@ -159,7 +181,8 @@ const BLOCKED_RESOURCE_TYPES = new Set(["image", "font", "media", "stylesheet"])
 async function fetchOnce(
   url: string,
   gotoTimeoutMs: number,
-  postGotoWaitMs: number
+  postGotoWaitMs: number,
+  signal?: AbortSignal
 ): Promise<string> {
   const browser = await getSharedBrowser();
   const context = await browser.newContext({ userAgent: USER_AGENT, locale: "en-US" });
@@ -174,9 +197,31 @@ async function fetchOnce(
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: gotoTimeoutMs });
-    if (postGotoWaitMs > 0) await page.waitForTimeout(postGotoWaitMs);
-    return await page.content();
+    const navigation = (async () => {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: gotoTimeoutMs });
+      if (postGotoWaitMs > 0) await page.waitForTimeout(postGotoWaitMs);
+      return await page.content();
+    })();
+
+    if (!signal) return await navigation;
+
+    // Once the caller aborts, don't wait for the navigation's own
+    // `gotoTimeoutMs` (up to 20s) — race it against the abort and let the
+    // outer `finally` close the context immediately, freeing the page slot
+    // for the next queued provider. The orphaned navigation keeps running
+    // until it settles on its own; nothing awaits it further, so it can't
+    // throw an unhandled rejection.
+    navigation.catch(() => {});
+    return await Promise.race([
+      navigation,
+      new Promise<string>((_, reject) => {
+        if (signal.aborted) {
+          reject(new Error("aborted"));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }),
+    ]);
   } finally {
     // The browser that owns this context may itself be the thing that just
     // crashed (see the retry below) — closing an already-dead context would
@@ -193,14 +238,23 @@ async function fetchOnce(
 // semantics.
 export async function fetchHtmlViaBrowser(
   url: string,
-  opts: { gotoTimeoutMs?: number; postGotoWaitMs?: number } = {}
+  opts: { gotoTimeoutMs?: number; postGotoWaitMs?: number; signal?: AbortSignal } = {}
 ): Promise<string | null> {
-  const { gotoTimeoutMs = 10000, postGotoWaitMs = 0 } = opts;
+  const { gotoTimeoutMs = 10000, postGotoWaitMs = 0, signal } = opts;
 
-  await acquirePageSlot();
+  if (signal?.aborted) return null;
+
   try {
+    await acquirePageSlot(signal);
+  } catch {
+    // Aborted while queued for a page slot — never held one, nothing to
+    // release.
+    return null;
+  }
+  try {
+    if (signal?.aborted) return null;
     try {
-      return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
+      return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs, signal);
     } catch (err) {
       // The shared Chromium process can crash mid-request (confirmed live
       // 2026-07-10: "Target page, context or browser has been closed" at
@@ -217,8 +271,9 @@ export async function fetchHtmlViaBrowser(
       // doesn't add latency to the common case.
       if (isSharedBrowserClosedError(err)) {
         sharedBrowser = null;
+        if (signal?.aborted) return null;
         try {
-          return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs);
+          return await fetchOnce(url, gotoTimeoutMs, postGotoWaitMs, signal);
         } catch {
           return null;
         }

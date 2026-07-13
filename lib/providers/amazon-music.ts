@@ -8,19 +8,23 @@ const AMAZON_SEARCH_URL = "https://www.amazon.com/s";
 export const amazonMusicProvider: Provider = {
   name: "Amazon Music",
 
-  async search(query: string): Promise<ProviderResult> {
+  async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${AMAZON_SEARCH_URL}?k=${encodeURIComponent(query)}&i=digital-music`;
     // Amazon's Akamai bot-management interstitial needs a beat after
     // `domcontentloaded` to clear before the real result markup is present —
     // 2500ms leaves headroom inside the orchestrator's 15s budget for this
     // provider (see route.ts's per-provider timeout overrides).
-    const html = await fetchHtmlViaBrowser(url, { gotoTimeoutMs: 20000, postGotoWaitMs: 2500 });
-    if (!html) return { platform: "Amazon Music", status: "error" };
+    const html = await fetchHtmlViaBrowser(url, {
+      gotoTimeoutMs: 20000,
+      postGotoWaitMs: 2500,
+      signal,
+    });
+    if (!html) return { platform: amazonMusicProvider.name, status: "error" };
 
     const $ = cheerio.load(html);
     const firstResult = $('div[data-component-type="s-search-result"]').first();
     if (firstResult.length === 0) {
-      return { platform: "Amazon Music", status: "not_found" };
+      return { platform: amazonMusicProvider.name, status: "not_found" };
     }
 
     const asin = firstResult.attr("data-asin");
@@ -33,15 +37,15 @@ export const amazonMusicProvider: Provider = {
     const cover = firstResult.find("img.s-image").first().attr("src");
 
     if (!asin || !title) {
-      return { platform: "Amazon Music", status: "not_found" };
+      return { platform: amazonMusicProvider.name, status: "not_found" };
     }
 
     if (!isRelevantMatch(query, `${artist} ${title}`)) {
-      return { platform: "Amazon Music", status: "not_found" };
+      return { platform: amazonMusicProvider.name, status: "not_found" };
     }
 
     return {
-      platform: "Amazon Music",
+      platform: amazonMusicProvider.name,
       status: "found",
       purchaseUrl: `https://www.amazon.com/dp/${asin}`,
       coverUrl: cover,

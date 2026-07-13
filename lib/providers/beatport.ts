@@ -68,17 +68,21 @@ function productPageTrack(nextData: unknown): BeatportProductTrack | null {
   return data?.props?.pageProps?.dehydratedState?.queries?.[0]?.state?.data ?? null;
 }
 
-async function fetchProductPage(url: string, query: string): Promise<ProviderResult> {
+async function fetchProductPage(
+  url: string,
+  query: string,
+  signal?: AbortSignal
+): Promise<ProviderResult> {
   // A Google-found URL that's now unreachable is "no usable result", not a
   // Beatport-side technical failure — stays not_found, never error.
-  const html = await fetchHtmlViaBrowser(url);
-  if (!html) return { platform: "Beatport", status: "not_found" };
+  const html = await fetchHtmlViaBrowser(url, { signal });
+  if (!html) return { platform: beatportProvider.name, status: "not_found" };
 
   const nextData = extractNextData(html);
-  if (!nextData) return { platform: "Beatport", status: "not_found" };
+  if (!nextData) return { platform: beatportProvider.name, status: "not_found" };
 
   const track = productPageTrack(nextData);
-  if (!track) return { platform: "Beatport", status: "not_found" };
+  if (!track) return { platform: beatportProvider.name, status: "not_found" };
 
   const title =
     track.mix_name && track.mix_name !== "Original Mix"
@@ -87,11 +91,11 @@ async function fetchProductPage(url: string, query: string): Promise<ProviderRes
   const artist = track.artists?.[0]?.name ?? "";
 
   if (!isRelevantMatch(query, `${artist} ${title}`)) {
-    return { platform: "Beatport", status: "not_found" };
+    return { platform: beatportProvider.name, status: "not_found" };
   }
 
   return {
-    platform: "Beatport",
+    platform: beatportProvider.name,
     status: "found",
     purchaseUrl: url,
     coverUrl: track.image?.uri,
@@ -124,14 +128,14 @@ function titleAndArtist(track: BeatportTrack): { title: string; artist: string }
 export const beatportProvider: Provider = {
   name: "Beatport",
 
-  async search(query: string): Promise<ProviderResult> {
+  async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${BEATPORT_SEARCH_URL}?q=${encodeURIComponent(query)}`;
 
-    const html = await fetchHtmlViaBrowser(url);
-    if (!html) return { platform: "Beatport", status: "error" };
+    const html = await fetchHtmlViaBrowser(url, { signal });
+    if (!html) return { platform: beatportProvider.name, status: "error" };
 
     const nextData = extractNextData(html);
-    if (!nextData) return { platform: "Beatport", status: "error" };
+    if (!nextData) return { platform: beatportProvider.name, status: "error" };
 
     // Beatport's own search ranks by its own relevance/popularity signal,
     // not query-token overlap — the correct match isn't always first result
@@ -148,16 +152,17 @@ export const beatportProvider: Provider = {
       const googleUrl = await findViaGoogle(
         query,
         "beatport.com/track",
-        (u) => /\/track\//.test(u)
+        (u) => /\/track\//.test(u),
+        signal
       );
-      if (!googleUrl) return { platform: "Beatport", status: "not_found" };
-      return fetchProductPage(googleUrl, query);
+      if (!googleUrl) return { platform: beatportProvider.name, status: "not_found" };
+      return fetchProductPage(googleUrl, query, signal);
     }
 
     const { title, artist } = titleAndArtist(track);
 
     return {
-      platform: "Beatport",
+      platform: beatportProvider.name,
       status: "found",
       purchaseUrl: `https://www.beatport.com/track/${slugify(track.track_name)}/${track.track_id}`,
       coverUrl: track.track_image_uri,
