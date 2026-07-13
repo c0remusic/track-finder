@@ -131,11 +131,18 @@ export const beatportProvider: Provider = {
   async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${BEATPORT_SEARCH_URL}?q=${encodeURIComponent(query)}`;
 
+    // Beatport's own search page can come back as a Cloudflare "Just a
+    // moment..." challenge instead of real markup (probabilistic bot-block,
+    // see .claude/rules/playwright.md) — that's a failure to get usable data
+    // from Beatport's own search, not proof the track isn't there. Treat it
+    // the same as "own search returned zero relevant tracks" below and fall
+    // through to the Google fallback, rather than reporting `error` and
+    // skipping the fallback that would otherwise find it (confirmed live
+    // 2026-07-13: "Ticon Mona Bone" blocked on Beatport's own search every
+    // time, but the Google fallback path below — already used for the
+    // zero-match case — reaches the real product page).
     const html = await fetchHtmlViaBrowser(url, { signal });
-    if (!html) return { platform: beatportProvider.name, status: "error" };
-
-    const nextData = extractNextData(html);
-    if (!nextData) return { platform: beatportProvider.name, status: "error" };
+    const nextData = html ? extractNextData(html) : null;
 
     // Beatport's own search ranks by its own relevance/popularity signal,
     // not query-token overlap — the correct match isn't always first result
@@ -143,10 +150,12 @@ export const beatportProvider: Provider = {
     // tracks above the actual "Monda Bone" match). Scan every returned track
     // for the first one isRelevantMatch accepts, same pattern as Bandcamp's
     // autocomplete .find(), before falling back to Google.
-    const track = searchTracks(nextData).find((t) => {
-      const { title, artist } = titleAndArtist(t);
-      return isRelevantMatch(query, `${artist} ${title}`);
-    });
+    const track = nextData
+      ? searchTracks(nextData).find((t) => {
+          const { title, artist } = titleAndArtist(t);
+          return isRelevantMatch(query, `${artist} ${title}`);
+        })
+      : undefined;
 
     if (!track) {
       const googleUrl = await findViaGoogle(

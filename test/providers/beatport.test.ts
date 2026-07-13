@@ -58,12 +58,12 @@ describe("beatportProvider", () => {
     expect(result).toEqual({ platform: "Beatport", status: "not_found" });
   });
 
-  it("returns error when the browser fetch fails", async () => {
+  it("falls back to Google (and returns not_found) when the browser fetch fails outright", async () => {
     mockBrowserFetch.mockResolvedValue(null);
 
     const result = await beatportProvider.search("anything");
 
-    expect(result).toEqual({ platform: "Beatport", status: "error" });
+    expect(result).toEqual({ platform: "Beatport", status: "not_found" });
   });
 
   it("falls back to Google when the direct search has zero tracks, and parses the product page", async () => {

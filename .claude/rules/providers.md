@@ -66,3 +66,15 @@ incarnée concrètement dans ce code :
 - Ne jamais laisser une couche de protection secondaire (rate limiter)
   bloquer la fonctionnalité cœur sur sa propre panne — fail-open obligatoire
   (`lib/rate-limit.ts`).
+- **Le fallback Google d'un provider (Beatport/Traxsource) doit se déclencher
+  dès que la recherche propre au site n'a rien donné d'exploitable — y
+  compris quand le fetch/parse lui-même échoue (page bloquée Cloudflare),
+  pas seulement quand il réussit mais ne trouve aucun titre pertinent.**
+  Bug réel trouvé par test manuel (2026-07-13) : "Ticon Mona Bone" restait
+  affiché "Indisponible" sur Beatport en boucle parce que le blocage
+  Cloudflare de la page de recherche propre court-circuitait le fallback
+  Google avant même de l'atteindre, alors que ce fallback aurait très
+  probablement trouvé le morceau (comme il l'a fait sur Bandcamp dans la
+  même requête). Toute nouvelle intégration avec un fallback Google doit
+  router TOUTE forme d'échec de la recherche propre (html null, parse
+  échoué, zéro résultat pertinent) vers le même chemin de fallback.

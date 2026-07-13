@@ -101,8 +101,25 @@ export const traxsourceProvider: Provider = {
   async search(query: string, signal?: AbortSignal): Promise<ProviderResult> {
     const url = `${TRAXSOURCE_SEARCH_URL}?term=${encodeURIComponent(query)}`;
 
+    // Traxsource's own search page can come back as a Cloudflare "Just a
+    // moment..." challenge instead of real markup (probabilistic bot-block,
+    // see .claude/rules/playwright.md) — that's a failure to get usable data
+    // from Traxsource's own search, not proof the track isn't there. Treat it
+    // the same as "own search returned zero relevant rows" below and fall
+    // through to the Google fallback instead of reporting `error` and
+    // skipping the fallback that would otherwise find it (same gap
+    // confirmed live on Beatport, 2026-07-13).
     const html = await fetchHtmlViaBrowser(url, { signal });
-    if (!html) return { platform: traxsourceProvider.name, status: "error" };
+    if (!html) {
+      const googleUrl = await findViaGoogle(
+        query,
+        "traxsource.com/track",
+        (u) => /\/track\//.test(u),
+        signal
+      );
+      if (!googleUrl) return { platform: traxsourceProvider.name, status: "not_found" };
+      return fetchProductPage(googleUrl, query, signal);
+    }
 
     try {
       const $ = cheerio.load(html);
